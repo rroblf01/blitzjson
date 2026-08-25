@@ -10,6 +10,9 @@ Drop-in replacement for Python's `json` module with native Django type support. 
 - **Native Django types**: Handles `datetime`, `date`, `time`, `timedelta`, `UUID`, `Decimal`, `QuerySet`, `Model`, `Promise` without custom encoders
 - **Rust-powered**: Direct serialization to JSON buffer via CPython FFI, no intermediate Python objects
 - **Zero dependencies**: No runtime Python dependencies required
+- **Full json API**: `ensure_ascii`, `indent`, `sort_keys`, `allow_nan`, `default` (recursive)
+- **Streaming**: `stream_dump_queryset()` for memory-efficient large QuerySet serialization
+- **Django integration**: `BlitzJsonResponse`, `BlitzJSONEncoder`, `install()` monkey-patch
 
 ## Installation
 
@@ -99,14 +102,14 @@ vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64):
 ```
 Benchmark                           json+DJE    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 2.5µs        0.4µs      5.6x
-Nested dict (deep)                     5.3µs        1.2µs      4.3x
-Large list (1000 items)              729.3µs      172.7µs      4.2x
-String-heavy dict (20 keys)            4.4µs        1.2µs      3.5x
-Datetime dict                          9.4µs        4.5µs      2.1x
-UUID dict                              6.5µs        3.0µs      2.1x
-Decimal dict                           4.1µs        0.9µs      4.7x
-Mixed dict (all types)                 6.7µs        2.6µs      2.6x
+Simple dict (4 fields)                 2.3µs        0.4µs      6.2x
+Nested dict (deep)                     5.2µs        1.5µs      3.3x
+Large list (1000 items)              727.1µs      217.2µs      3.3x
+String-heavy dict (20 keys)            5.3µs        1.5µs      3.5x
+Datetime dict                         10.9µs        6.4µs      1.7x
+UUID dict                              8.5µs        3.9µs      2.2x
+Decimal dict                           4.6µs        1.3µs      3.5x
+Mixed dict (all types)                 6.5µs        3.0µs      2.2x
 ```
 
 ### loads
@@ -114,10 +117,18 @@ Mixed dict (all types)                 6.7µs        2.6µs      2.6x
 ```
 Benchmark                               json    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 1.6µs        0.6µs      2.6x
-Nested dict (deep)                     4.5µs        3.1µs      1.4x
-Large list (1000 items)              674.4µs      483.6µs      1.4x
-String-heavy dict (20 keys)            3.8µs        3.2µs      1.2x
+Simple dict (4 fields)                 1.5µs        0.5µs      2.8x
+Nested dict (deep)                     4.5µs        3.7µs      1.2x
+Large list (1000 items)              664.9µs      451.5µs      1.5x
+String-heavy dict (20 keys)            3.8µs        2.9µs      1.3x
+```
+
+### Django Response
+
+```
+Benchmark                             JsonResponse      BlitzJson    Speedup
+------------------------------------------------------------------------
+API response (50 users)                 44.9µs         19.6µs      2.3x
 ```
 
 ## Requirements
