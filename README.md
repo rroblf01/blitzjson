@@ -122,7 +122,11 @@ Optimized serialization for Django QuerySets.
 
 ## Benchmarks
 
-vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64):
+vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64, consumer hardware):
+
+> **Note:** Benchmarks run on consumer hardware (AMD Ryzen 9 7900X). CI runners
+> (Intel Xeon server CPUs) may show different results due to lower single-thread
+> performance. For stable benchmarks, run locally with `uv run python benchmarks/bench_serialization.py`.
 
 ### dumps
 

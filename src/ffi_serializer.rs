@@ -23,6 +23,7 @@ pub unsafe fn ffi_serialize(
     serialize_value(py, &obj_bound, w, depth, default, allow_nan, sort_keys)
 }
 
+#[inline(always)]
 unsafe fn serialize_value(
     py: Python<'_>,
     obj: &Bound<'_, PyAny>,
@@ -40,48 +41,21 @@ unsafe fn serialize_value(
         w.write_bool(b);
         return Ok(());
     }
-    if let Ok(s) = obj.extract::<String>() {
-        w.write_string(&s);
-        return Ok(());
-    }
-    let type_name = obj
-        .get_type()
-        .name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    if type_name == "Decimal" || type_name == "decimal.Decimal" || type_name == "UUID" {
-        let s: String = obj.str()?.extract()?;
-        w.write_string(&s);
-        return Ok(());
-    }
-    if let Ok(i) = obj.extract::<i64>() {
-        w.write_i64(i);
-        return Ok(());
-    }
-    if let Ok(f) = obj.extract::<f64>() {
-        if f.is_nan() || f.is_infinite() {
-            if allow_nan {
-                if f.is_nan() {
-                    w.write_raw("NaN");
-                } else if f > 0.0 {
-                    w.write_raw("Infinity");
-                } else {
-                    w.write_raw("-Infinity");
-                }
-            } else {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Out of range float values are not JSON compliant",
-                ));
-            }
+    // String: use cast to avoid allocation
+    if let Ok(s) = obj.cast::<pyo3::types::PyString>() {
+        if let Ok(bytes) = s.to_str() {
+            w.write_string(bytes);
         } else {
-            w.write_f64(f);
+            let owned: String = s.extract()?;
+            w.write_string(&owned);
         }
         return Ok(());
     }
+    // Dict: most common container, check early
     if let Ok(dict) = obj.cast::<PyDict>() {
         w.write_object_open();
         if sort_keys {
-            let mut items: Vec<(String, Bound<'_, PyAny>)> = Vec::new();
+            let mut items: Vec<(String, Bound<'_, PyAny>)> = Vec::with_capacity(dict.len());
             for (k, v) in dict.iter() {
                 let key: String = k.extract()?;
                 items.push((key, v));
@@ -111,6 +85,7 @@ unsafe fn serialize_value(
         w.write_object_close();
         return Ok(());
     }
+    // List: second most common container
     if let Ok(list) = obj.cast::<pyo3::types::PyList>() {
         w.write_array_open();
         for (i, item) in list.iter().enumerate() {
@@ -122,6 +97,37 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
+    // Integers: try i64 first (most common), then u64 for large positives
+    if let Ok(i) = obj.extract::<i64>() {
+        w.write_i64(i);
+        return Ok(());
+    }
+    if let Ok(u) = obj.extract::<u64>() {
+        w.write_u64(u);
+        return Ok(());
+    }
+    // Floats
+    if let Ok(f) = obj.extract::<f64>() {
+        if f.is_nan() || f.is_infinite() {
+            if allow_nan {
+                if f.is_nan() {
+                    w.write_raw("NaN");
+                } else if f > 0.0 {
+                    w.write_raw("Infinity");
+                } else {
+                    w.write_raw("-Infinity");
+                }
+            } else {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Out of range float values are not JSON compliant",
+                ));
+            }
+        } else {
+            w.write_f64(f);
+        }
+        return Ok(());
+    }
+    // Tuple
     if let Ok(tuple) = obj.cast::<pyo3::types::PyTuple>() {
         w.write_array_open();
         for (i, item) in tuple.iter().enumerate() {
@@ -133,6 +139,7 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
+    // Set
     if let Ok(set) = obj.cast::<pyo3::types::PySet>() {
         let mut items: Vec<Bound<'_, PyAny>> = set.iter().collect();
         items.sort_by(|a, b| {
@@ -151,6 +158,7 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
+    // FrozenSet
     if let Ok(fset) = obj.cast::<pyo3::types::PyFrozenSet>() {
         let mut items: Vec<Bound<'_, PyAny>> = fset.iter().collect();
         items.sort_by(|a, b| {
@@ -169,18 +177,21 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
+    // Bytes
     if let Ok(bytes) = obj.cast::<pyo3::types::PyBytes>() {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes());
         w.write_string(&encoded);
         return Ok(());
     }
+    // ByteArray
     if let Ok(ba) = obj.cast::<pyo3::types::PyByteArray>() {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(ba.as_bytes());
         w.write_string(&encoded);
         return Ok(());
     }
+    // Fallback: check special types by name (Decimal, UUID, datetime, etc.)
     serialize_fallback(py, obj, w, depth, default, allow_nan, sort_keys)
 }
 
@@ -243,6 +254,11 @@ unsafe fn serialize_fallback(
                 result.push_str("T0S");
             }
             w.write_string(&result);
+            return Ok(());
+        }
+        "UUID" | "Decimal" | "decimal.Decimal" => {
+            let s: String = obj.str()?.extract()?;
+            w.write_string(&s);
             return Ok(());
         }
         _ => {}
