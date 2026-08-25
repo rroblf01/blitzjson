@@ -1,0 +1,44 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "blitzjson"
+version = "0.1.0"
+description = "Drop-in replacement for json with native Django type support. Rust-powered via PyO3."
+requires-python = ">=3.11"
+license = "MIT"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: Django",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+django = ["django>=4.2"]
+dev = [
+    "pytest>=8.0",
+    "pytest-benchmark>=5.0",
+    "orjson>=3.10",
+    "django>=4.2",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "blitzjson._core"
+python-source = "python"
+
+[tool.uv]
+cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+
+[dependency-groups]
+dev = [
+    "orjson>=3.12.0",
+    "pytest>=9.1.1",
+    "pytest-benchmark>=5.3.0",
+]
