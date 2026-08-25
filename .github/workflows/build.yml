@@ -1,4 +1,4 @@
-name: Build & Publish
+name: publish
 
 on:
   release:
@@ -173,5 +173,5 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: Publish to PyPI
+      - name: publish
         uses: pypa/gh-action-pypi-publish@release/v1
