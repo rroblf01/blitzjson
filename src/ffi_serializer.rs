@@ -12,6 +12,7 @@ pub unsafe fn ffi_serialize(
     depth: usize,
     default: *mut PyObject,
     allow_nan: bool,
+    sort_keys: bool,
 ) -> Result<(), PyErr> {
     if depth >= MAX_DEPTH {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -19,7 +20,7 @@ pub unsafe fn ffi_serialize(
         ));
     }
     let obj_bound = Bound::from_borrowed_ptr(py, obj);
-    serialize_value(py, &obj_bound, w, depth, default, allow_nan)
+    serialize_value(py, &obj_bound, w, depth, default, allow_nan, sort_keys)
 }
 
 unsafe fn serialize_value(
@@ -29,6 +30,7 @@ unsafe fn serialize_value(
     depth: usize,
     default: *mut PyObject,
     allow_nan: bool,
+    sort_keys: bool,
 ) -> Result<(), PyErr> {
     if obj.is_none() {
         w.write_none();
@@ -76,7 +78,7 @@ unsafe fn serialize_value(
             let key: String = k.extract()?;
             w.write_string(&key);
             w.write_colon();
-            serialize_value(py, &v, w, depth + 1, default, allow_nan)?;
+            serialize_value(py, &v, w, depth + 1, default, allow_nan, sort_keys)?;
             first = false;
         }
         w.write_object_close();
@@ -88,7 +90,7 @@ unsafe fn serialize_value(
             if i > 0 {
                 w.write_comma();
             }
-            serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
+            serialize_value(py, &item, w, depth + 1, default, allow_nan, sort_keys)?;
         }
         w.write_array_close();
         return Ok(());
@@ -99,7 +101,7 @@ unsafe fn serialize_value(
             if i > 0 {
                 w.write_comma();
             }
-            serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
+            serialize_value(py, &item, w, depth + 1, default, allow_nan, sort_keys)?;
         }
         w.write_array_close();
         return Ok(());
@@ -119,7 +121,7 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
-    serialize_fallback(py, obj, w, depth, default, allow_nan)
+    serialize_fallback(py, obj, w, depth, default, allow_nan, sort_keys)
 }
 
 unsafe fn serialize_fallback(
@@ -129,13 +131,13 @@ unsafe fn serialize_fallback(
     depth: usize,
     default: *mut PyObject,
     allow_nan: bool,
+    sort_keys: bool,
 ) -> Result<(), PyErr> {
     let type_name = obj
         .get_type()
         .name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-
     match type_name.as_str() {
         "datetime" | "date" | "time" => {
             let iso = obj.call_method0("isoformat")?;
@@ -190,8 +192,6 @@ unsafe fn serialize_fallback(
         }
         _ => {}
     }
-
-    // Django types
     if let Ok(dt) = py.import("django.utils.functional") {
         if let Ok(pt) = dt.getattr("Promise") {
             if obj.is_instance(&pt).unwrap_or(false) {
@@ -204,14 +204,14 @@ unsafe fn serialize_fallback(
     if let Ok(m) = py.import("django.db.models") {
         if let Ok(mt) = m.getattr("Model") {
             if obj.is_instance(&mt).unwrap_or(false) {
-                return serialize_model(py, obj, w, depth, default, allow_nan);
+                return serialize_model(py, obj, w, depth, default, allow_nan, sort_keys);
             }
         }
     }
     if let Ok(m) = py.import("django.db.models.query") {
         if let Ok(qt) = m.getattr("QuerySet") {
             if obj.is_instance(&qt).unwrap_or(false) {
-                return serialize_queryset(py, obj, w, depth, default, allow_nan);
+                return serialize_queryset(py, obj, w, depth, default, allow_nan, sort_keys);
             }
         }
     }
@@ -219,20 +219,20 @@ unsafe fn serialize_fallback(
         if let Ok(et) = m.getattr("Enum") {
             if obj.is_instance(&et).unwrap_or(false) {
                 let val = obj.getattr("value")?;
-                serialize_value(py, &val, w, depth, default, allow_nan)?;
+                serialize_value(py, &val, w, depth, default, allow_nan, sort_keys)?;
                 return Ok(());
             }
         }
     }
     if obj.hasattr("__dataclass_fields__").unwrap_or(false) {
         let dict = py.import("dataclasses")?.call_method1("asdict", (&obj,))?;
-        serialize_value(py, &dict, w, depth, default, allow_nan)?;
+        serialize_value(py, &dict, w, depth, default, allow_nan, sort_keys)?;
         return Ok(());
     }
     if !default.is_null() {
         let bound_default = Bound::from_borrowed_ptr(py, default);
         let result = bound_default.call1((&obj,))?;
-        serialize_value(py, &result, w, depth, default, allow_nan)?;
+        serialize_value(py, &result, w, depth, default, allow_nan, sort_keys)?;
         return Ok(());
     }
     Err(pyo3::exceptions::PyTypeError::new_err(format!(
@@ -248,6 +248,7 @@ unsafe fn serialize_model(
     depth: usize,
     default: *mut PyObject,
     allow_nan: bool,
+    sort_keys: bool,
 ) -> Result<(), PyErr> {
     let meta = obj.getattr("_meta")?;
     let fields = meta.getattr("fields")?;
@@ -264,7 +265,7 @@ unsafe fn serialize_model(
         w.write_string(&field_name);
         w.write_colon();
         let value = obj.getattr(field_name.as_str())?;
-        serialize_value(py, &value, w, depth + 1, default, allow_nan)?;
+        serialize_value(py, &value, w, depth + 1, default, allow_nan, sort_keys)?;
         first = false;
     }
     w.write_object_close();
@@ -278,6 +279,7 @@ unsafe fn serialize_queryset(
     depth: usize,
     default: *mut PyObject,
     allow_nan: bool,
+    sort_keys: bool,
 ) -> Result<(), PyErr> {
     let iterator = pyo3::types::PyIterator::from_object(qs)?;
     w.write_array_open();
@@ -287,7 +289,7 @@ unsafe fn serialize_queryset(
         if !first {
             w.write_comma();
         }
-        serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
+        serialize_value(py, &item, w, depth + 1, default, allow_nan, sort_keys)?;
         first = false;
     }
     w.write_array_close();

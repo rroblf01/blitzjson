@@ -5,10 +5,6 @@ mod writer;
 use pyo3::prelude::*;
 use writer::JsonWriter;
 
-// ═══════════════════════════════════════════════════════════════════
-// dumps - Drop-in replacement for json.dumps()
-// ═══════════════════════════════════════════════════════════════════
-
 #[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
@@ -38,8 +34,6 @@ fn dumps<'py>(
             )
         }
         None => {
-            // json.dumps uses compact item separator when indent is set,
-            // but key separator is always ": " (with space)
             if indent_val.is_some() {
                 (",", ": ")
             } else {
@@ -50,9 +44,16 @@ fn dumps<'py>(
     let mut writer =
         JsonWriter::with_separators(1024, ensure_ascii, indent_val, sort_keys, item_sep, key_sep);
     let default_obj = default.map(|d| d.as_ptr()).unwrap_or(std::ptr::null_mut());
-
     let result = unsafe {
-        ffi_serializer::ffi_serialize(py, obj.as_ptr(), &mut writer, 0, default_obj, allow_nan)
+        ffi_serializer::ffi_serialize(
+            py,
+            obj.as_ptr(),
+            &mut writer,
+            0,
+            default_obj,
+            allow_nan,
+            sort_keys,
+        )
     };
     match result {
         Ok(()) => Ok(writer.into_string()),
@@ -69,6 +70,7 @@ fn dumps<'py>(
                         0,
                         default_obj,
                         allow_nan,
+                        sort_keys,
                     )?;
                 }
                 Ok(writer2.into_string())
@@ -78,10 +80,6 @@ fn dumps<'py>(
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// loads - Drop-in replacement for json.loads()
-// ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
@@ -117,10 +115,6 @@ fn loads<'py>(
         parse_int,
     )
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// dump - Drop-in replacement for json.dump()
-// ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
@@ -159,10 +153,6 @@ fn dump<'py>(
     Ok(())
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// load - Drop-in replacement for json.load()
-// ═══════════════════════════════════════════════════════════════════
-
 #[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
@@ -191,10 +181,6 @@ fn load<'py>(
     )
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Extra functions (blitzjson extensions)
-// ═══════════════════════════════════════════════════════════════════
-
 #[pyfunction]
 #[pyo3(signature = (obj, pretty=false))]
 fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, pretty: bool) -> PyResult<Vec<u8>> {
@@ -208,6 +194,7 @@ fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, pretty: bool) -> PyResult<Vec<u
             0,
             std::ptr::null_mut(),
             true,
+            false,
         )?;
     }
     Ok(writer.into_bytes())
@@ -224,6 +211,7 @@ fn dump_queryset(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<String
             0,
             std::ptr::null_mut(),
             true,
+            false,
         )?;
     }
     Ok(writer.into_string())
@@ -240,6 +228,7 @@ fn dump_queryset_bytes(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<
             0,
             std::ptr::null_mut(),
             true,
+            false,
         )?;
     }
     Ok(writer.into_bytes())
@@ -270,6 +259,7 @@ fn stream_dump_queryset(
                 0,
                 std::ptr::null_mut(),
                 true,
+                false,
             )?;
         }
         first = false;
@@ -305,6 +295,7 @@ fn stream_dump_queryset_jsonl(
                 0,
                 std::ptr::null_mut(),
                 true,
+                false,
             )?;
         }
         writer.buf_mut().push('\n');
@@ -318,10 +309,6 @@ fn stream_dump_queryset_jsonl(
     }
     Ok(())
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// Module definition
-// ═══════════════════════════════════════════════════════════════════
 
 #[pyfunction]
 #[pyo3(signature = (s, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None))]
