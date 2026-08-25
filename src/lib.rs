@@ -239,6 +239,34 @@ fn stream_dump_queryset_jsonl(
 // Module definition
 // ═══════════════════════════════════════════════════════════════════
 
+#[pyfunction]
+#[pyo3(signature = (s, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None))]
+fn deserialize_direct_fn<'py>(
+    py: Python<'py>,
+    s: &Bound<'py, PyAny>,
+    object_hook: Option<&Bound<'py, PyAny>>,
+    object_pairs_hook: Option<&Bound<'py, PyAny>>,
+    parse_float: Option<&Bound<'py, PyAny>>,
+    parse_int: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let json_str: String = s.extract()?;
+    deserializer::deserialize_direct(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+}
+
+#[pyfunction]
+#[pyo3(signature = (s, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None))]
+fn deserialize_strict_fn<'py>(
+    py: Python<'py>,
+    s: &Bound<'py, PyAny>,
+    object_hook: Option<&Bound<'py, PyAny>>,
+    object_pairs_hook: Option<&Bound<'py, PyAny>>,
+    parse_float: Option<&Bound<'py, PyAny>>,
+    parse_int: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let json_str: String = s.extract()?;
+    deserializer::deserialize_strict(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+}
+
 #[pymodule]
 #[pyo3(name = "_core")]
 fn blitzjson(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -251,6 +279,8 @@ fn blitzjson(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dump_queryset_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(stream_dump_queryset, m)?)?;
     m.add_function(wrap_pyfunction!(stream_dump_queryset_jsonl, m)?)?;
+    m.add_function(wrap_pyfunction!(deserialize_direct_fn, m)?)?;
+    m.add_function(wrap_pyfunction!(deserialize_strict_fn, m)?)?;
     m.add("__version__", "0.1.0")?;
     Ok(())
 }

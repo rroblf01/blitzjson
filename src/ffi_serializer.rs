@@ -321,7 +321,7 @@ unsafe fn ffi_serialize_fallback(
     let obj_bound = Bound::from_borrowed_ptr(py, obj);
 
     if let Some(ct) = get_cached_types(py) {
-        let obj_type = Py_TYPE(obj);
+        let _obj_type = Py_TYPE(obj);
 
         // datetime (before date since datetime is subclass of date)
         if !ct.datetime_type.is_null() && PyObject_IsInstance(obj, ct.datetime_type) == 1 {

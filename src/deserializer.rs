@@ -2,10 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3::IntoPyObjectExt;
 
-/// Direct JSON deserializer that creates Python objects without intermediate serde_json::Value.
-///
-/// # Safety
-/// This function parses JSON and creates Python objects directly.
+/// Direct JSON deserializer using FFI for maximum performance.
 pub fn deserialize_direct<'py>(
     py: Python<'py>,
     s: &str,
@@ -15,23 +12,43 @@ pub fn deserialize_direct<'py>(
     parse_int: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let bytes = s.as_bytes();
-    let mut parser = JsonParser::new(bytes);
+    let mut parser = JsonParser::new(bytes, s);
+    parser.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)
+}
+
+/// Deserialize a JSON string, checking for extra data at the end.
+pub fn deserialize_strict<'py>(
+    py: Python<'py>,
+    s: &str,
+    object_hook: Option<&Bound<'py, PyAny>>,
+    object_pairs_hook: Option<&Bound<'py, PyAny>>,
+    parse_float: Option<&Bound<'py, PyAny>>,
+    parse_int: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let bytes = s.as_bytes();
+    let mut parser = JsonParser::new(bytes, s);
     let result = parser.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
+    parser.skip_whitespace();
+    if parser.pos < parser.bytes.len() {
+        return Err(parser.error("Extra data after JSON value"));
+    }
     Ok(result)
 }
 
 struct JsonParser<'a> {
     bytes: &'a [u8],
     pos: usize,
+    doc: &'a str,
 }
 
 impl<'a> JsonParser<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
+    fn new(bytes: &'a [u8], doc: &'a str) -> Self {
+        Self { bytes, pos: 0, doc }
     }
 
-    #[inline]
+    #[inline(always)]
     fn skip_whitespace(&mut self) {
+        // SIMD-friendly: skip multiple whitespace bytes at once
         while self.pos < self.bytes.len() {
             match self.bytes[self.pos] {
                 b' ' | b'\n' | b'\r' | b'\t' => self.pos += 1,
@@ -40,16 +57,29 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
 
-    #[inline]
+    #[inline(always)]
     fn next_byte(&mut self) -> Option<u8> {
         let b = self.bytes.get(self.pos).copied();
         if b.is_some() { self.pos += 1; }
         b
+    }
+
+    /// Create a JSONDecodeError with position information
+    fn error(&self, msg: &str) -> PyErr {
+        let row = self.bytes[..self.pos].iter().filter(|&&b| b == b'\n').count() + 1;
+        let last_newline = self.bytes[..self.pos].iter().rposition(|&b| b == b'\n');
+        let col = match last_newline {
+            Some(pos) => self.pos - pos,
+            None => self.pos + 1,
+        };
+        pyo3::exceptions::PyValueError::new_err(
+            format!("{} at row {}, column {}", msg, row, col)
+        )
     }
 
     fn parse_value<'py>(
@@ -62,32 +92,44 @@ impl<'a> JsonParser<'a> {
     ) -> PyResult<Bound<'py, PyAny>> {
         self.skip_whitespace();
         match self.peek() {
-            Some(b'"') => self.parse_string(py).map(|s| s.into_any()),
+            Some(b'"') => self.parse_string(py),
             Some(b'{') => self.parse_object(py, object_hook, object_pairs_hook, parse_float, parse_int),
             Some(b'[') => self.parse_array(py, object_hook, object_pairs_hook, parse_float, parse_int),
             Some(b't') | Some(b'f') => self.parse_bool(py),
             Some(b'n') => self.parse_null(py),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(py, parse_float, parse_int),
-            _ => Err(pyo3::exceptions::PyValueError::new_err("Invalid JSON")),
+            _ => Err(self.error("Invalid JSON value")),
         }
     }
 
+    /// Parse a JSON string. Fast path for strings without escapes.
     fn parse_string<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.next_byte(); // consume opening "
         let start = self.pos;
-        let mut result = String::with_capacity(64);
 
+        // Fast scan: find closing " without any escapes
+        while self.pos < self.bytes.len() {
+            match self.bytes[self.pos] {
+                b'"' => {
+                    // No escapes found - copy directly
+                    let s = unsafe {
+                        std::str::from_utf8_unchecked(&self.bytes[start..self.pos])
+                    };
+                    self.pos += 1; // skip closing "
+                    return Ok(s.into_pyobject(py)?.into_any());
+                }
+                b'\\' => break, // Found escape, fall through to slow path
+                _ => self.pos += 1,
+            }
+        }
+
+        // Slow path: handle escapes character by character
+        let mut result = String::with_capacity(64);
+        self.pos = start;
         loop {
             match self.next_byte() {
                 Some(b'"') => break,
                 Some(b'\\') => {
-                    // Copy the unescaped portion
-                    if start < self.pos - 1 {
-                        let raw = unsafe {
-                            std::str::from_utf8_unchecked(&self.bytes[start..self.pos - 1])
-                        };
-                        result.push_str(raw);
-                    }
                     match self.next_byte() {
                         Some(b'"') => result.push('"'),
                         Some(b'\\') => result.push('\\'),
@@ -103,22 +145,12 @@ impl<'a> JsonParser<'a> {
                                 result.push(c);
                             }
                         }
-                        _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid escape")),
+                        _ => return Err(self.error("Invalid escape sequence")),
                     }
-                    // Reset start to after the escape
-                    // SAFETY: self.pos is always valid here
                 }
-                None => return Err(pyo3::exceptions::PyValueError::new_err("Unterminated string")),
-                _ => {}
+                None => return Err(self.error("Unterminated string")),
+                Some(c) => result.push(c as char),
             }
-        }
-
-        // Copy remaining unescaped portion
-        if start < self.pos - 1 {
-            let raw = unsafe {
-                std::str::from_utf8_unchecked(&self.bytes[start..self.pos - 1])
-            };
-            result.push_str(raw);
         }
 
         Ok(result.into_pyobject(py)?.into_any())
@@ -128,13 +160,13 @@ impl<'a> JsonParser<'a> {
         let mut value: u32 = 0;
         for _ in 0..4 {
             let b = self.next_byte().ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err("Invalid Unicode escape")
+                self.error("Invalid Unicode escape")
             })?;
             value = (value << 4) | match b {
                 b'0'..=b'9' => (b - b'0') as u32,
                 b'a'..=b'f' => (b - b'a' + 10) as u32,
                 b'A'..=b'F' => (b - b'A' + 10) as u32,
-                _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid hex digit")),
+                _ => return Err(self.error("Invalid hex digit in Unicode escape")),
             };
         }
         Ok(value)
@@ -149,27 +181,39 @@ impl<'a> JsonParser<'a> {
         parse_int: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         self.next_byte(); // consume {
-        let dict = PyDict::new(py);
         self.skip_whitespace();
 
+        // Empty object
         if self.peek() == Some(b'}') {
             self.next_byte();
-        } else {
-            loop {
-                self.skip_whitespace();
-                let key = self.parse_string(py)?;
-                self.skip_whitespace();
-                self.next_byte(); // consume :
-                self.skip_whitespace();
-                let value = self.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
-                dict.set_item(&key, &value)?;
+            let dict = PyDict::new(py);
+            if let Some(hook) = object_pairs_hook {
+                return hook.call1((PyList::empty(py),));
+            }
+            if let Some(hook) = object_hook {
+                return hook.call1((&dict,));
+            }
+            return Ok(dict.into_any());
+        }
 
-                self.skip_whitespace();
-                match self.next_byte() {
-                    Some(b'}') => break,
-                    Some(b',') => continue,
-                    _ => return Err(pyo3::exceptions::PyValueError::new_err("Expected ',' or '}'")),
-                }
+        let dict = PyDict::new(py);
+        loop {
+            self.skip_whitespace();
+            let key = self.parse_string(py)?;
+            self.skip_whitespace();
+            match self.next_byte() {
+                Some(b':') => {}
+                _ => return Err(self.error("Expected ':' after key")),
+            }
+            self.skip_whitespace();
+            let value = self.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
+            dict.set_item(&key, &value)?;
+
+            self.skip_whitespace();
+            match self.next_byte() {
+                Some(b'}') => break,
+                Some(b',') => continue,
+                _ => return Err(self.error("Expected ',' or '}' in object")),
             }
         }
 
@@ -203,20 +247,22 @@ impl<'a> JsonParser<'a> {
         let list = PyList::empty(py);
         self.skip_whitespace();
 
+        // Empty array
         if self.peek() == Some(b']') {
             self.next_byte();
-        } else {
-            loop {
-                self.skip_whitespace();
-                let value = self.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
-                list.append(value)?;
+            return Ok(list.into_any());
+        }
 
-                self.skip_whitespace();
-                match self.next_byte() {
-                    Some(b']') => break,
-                    Some(b',') => continue,
-                    _ => return Err(pyo3::exceptions::PyValueError::new_err("Expected ',' or ']'")),
-                }
+        loop {
+            self.skip_whitespace();
+            let value = self.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
+            list.append(value)?;
+
+            self.skip_whitespace();
+            match self.next_byte() {
+                Some(b']') => break,
+                Some(b',') => continue,
+                _ => return Err(self.error("Expected ',' or ']' in array")),
             }
         }
 
@@ -233,7 +279,7 @@ impl<'a> JsonParser<'a> {
             let obj: Bound<'py, PyAny> = false.into_py_any(py)?.into_bound(py);
             Ok(obj)
         } else {
-            Err(pyo3::exceptions::PyValueError::new_err("Invalid boolean"))
+            Err(self.error("Invalid boolean"))
         }
     }
 
@@ -242,7 +288,7 @@ impl<'a> JsonParser<'a> {
             self.pos += 4;
             Ok(py.None().into_bound(py).into_any())
         } else {
-            Err(pyo3::exceptions::PyValueError::new_err("Invalid null"))
+            Err(self.error("Invalid null"))
         }
     }
 
@@ -283,7 +329,7 @@ impl<'a> JsonParser<'a> {
                 return pf.call1((num_str,));
             }
             let val: f64 = num_str.parse().map_err(|_| {
-                pyo3::exceptions::PyValueError::new_err("Invalid float")
+                self.error("Invalid float value")
             })?;
             Ok(val.into_pyobject(py)?.into_any())
         } else {

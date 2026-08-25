@@ -37,6 +37,8 @@ from blitzjson._core import (
     dump_queryset_bytes,
     stream_dump_queryset,
     stream_dump_queryset_jsonl,
+    deserialize_direct_fn as deserialize_direct,
+    deserialize_strict_fn as deserialize_strict,
 )
 from blitzjson._helpers import JSONDecodeError, JSONEncoder, JSONDecoder
 
@@ -56,9 +58,10 @@ def loads(s, cls=None, object_hook=None, parse_float=None,
           strict=True, **kw):
     """Deserialize s (a str, bytes or bytearray) to a Python object."""
     try:
-        return _rust_loads(s, object_hook=object_hook,
-                           object_pairs_hook=object_pairs_hook,
-                           parse_float=parse_float, parse_int=parse_int)
+        json_str = s if isinstance(s, str) else s.decode('utf-8') if isinstance(s, (bytes, bytearray)) else str(s)
+        return deserialize_strict(json_str, object_hook=object_hook,
+                                  object_pairs_hook=object_pairs_hook,
+                                  parse_float=parse_float, parse_int=parse_int)
     except ValueError as e:
         msg = str(e)
         doc = s if isinstance(s, str) else str(s)
