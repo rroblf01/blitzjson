@@ -1,7 +1,7 @@
 use crate::writer::JsonWriter;
 use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 
 const MAX_DEPTH: usize = 128;
 
@@ -30,35 +30,24 @@ unsafe fn serialize_value(
     default: *mut PyObject,
     allow_nan: bool,
 ) -> Result<(), PyErr> {
-    // None
     if obj.is_none() {
         w.write_none();
         return Ok(());
     }
-
-    // bool (must check before int - bool is subclass of int)
     if let Ok(b) = obj.extract::<bool>() {
         w.write_bool(b);
         return Ok(());
     }
-
-    // int
     if let Ok(i) = obj.extract::<i64>() {
         w.write_i64(i);
         return Ok(());
     }
-
-    // float
     if let Ok(f) = obj.extract::<f64>() {
         if f.is_nan() || f.is_infinite() {
             if allow_nan {
-                if f.is_nan() {
-                    w.write_raw("NaN");
-                } else if f > 0.0 {
-                    w.write_raw("Infinity");
-                } else {
-                    w.write_raw("-Infinity");
-                }
+                if f.is_nan() { w.write_raw("NaN"); }
+                else if f > 0.0 { w.write_raw("Infinity"); }
+                else { w.write_raw("-Infinity"); }
             } else {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "Out of range float values are not JSON compliant",
@@ -69,21 +58,15 @@ unsafe fn serialize_value(
         }
         return Ok(());
     }
-
-    // string
     if let Ok(s) = obj.extract::<String>() {
         w.write_string(&s);
         return Ok(());
     }
-
-    // dict
     if let Ok(dict) = obj.cast::<PyDict>() {
         w.write_object_open();
         let mut first = true;
         for (k, v) in dict.iter() {
-            if !first {
-                w.write_comma();
-            }
+            if !first { w.write_comma(); }
             let key: String = k.extract()?;
             w.write_string(&key);
             w.write_colon();
@@ -93,34 +76,24 @@ unsafe fn serialize_value(
         w.write_object_close();
         return Ok(());
     }
-
-    // list
-    if let Ok(list) = obj.cast::<PyList>() {
+    if let Ok(list) = obj.cast::<pyo3::types::PyList>() {
         w.write_array_open();
         for (i, item) in list.iter().enumerate() {
-            if i > 0 {
-                w.write_comma();
-            }
+            if i > 0 { w.write_comma(); }
             serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
         }
         w.write_array_close();
         return Ok(());
     }
-
-    // tuple
     if let Ok(tuple) = obj.cast::<pyo3::types::PyTuple>() {
         w.write_array_open();
         for (i, item) in tuple.iter().enumerate() {
-            if i > 0 {
-                w.write_comma();
-            }
+            if i > 0 { w.write_comma(); }
             serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
         }
         w.write_array_close();
         return Ok(());
     }
-
-    // set / frozenset
     if let Ok(set) = obj.cast::<pyo3::types::PySet>() {
         let mut items: Vec<String> = Vec::new();
         for item in set.iter() {
@@ -129,17 +102,11 @@ unsafe fn serialize_value(
         items.sort();
         w.write_array_open();
         for (i, _) in items.iter().enumerate() {
-            if i > 0 {
-                w.write_comma();
-            }
-            // Re-serialize each item by getting it from the set
-            // This is not ideal but correct
+            if i > 0 { w.write_comma(); }
         }
         w.write_array_close();
         return Ok(());
     }
-
-    // Django types via fallback
     serialize_fallback(py, obj, w, depth, default, allow_nan)
 }
 
@@ -151,11 +118,7 @@ unsafe fn serialize_fallback(
     default: *mut PyObject,
     allow_nan: bool,
 ) -> Result<(), PyErr> {
-    let type_name = obj
-        .get_type()
-        .name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let type_name = obj.get_type().name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
 
     match type_name.as_str() {
         "datetime" | "date" | "time" => {
@@ -180,31 +143,16 @@ unsafe fn serialize_fallback(
             }
             if hours != 0 || minutes != 0 || secs != 0 || micros != 0 {
                 result.push('T');
-                if hours != 0 {
-                    use std::fmt::Write;
-                    result.write_fmt(format_args!("{}H", hours)).unwrap();
-                }
-                if minutes != 0 {
-                    use std::fmt::Write;
-                    result.write_fmt(format_args!("{}M", minutes)).unwrap();
-                }
-                if micros > 0 {
-                    use std::fmt::Write;
-                    result
-                        .write_fmt(format_args!("{}.{:06}S", secs, micros))
-                        .unwrap();
-                } else if secs != 0 {
-                    use std::fmt::Write;
-                    result.write_fmt(format_args!("{}S", secs)).unwrap();
-                }
+                if hours != 0 { use std::fmt::Write; result.write_fmt(format_args!("{}H", hours)).unwrap(); }
+                if minutes != 0 { use std::fmt::Write; result.write_fmt(format_args!("{}M", minutes)).unwrap(); }
+                if micros > 0 { use std::fmt::Write; result.write_fmt(format_args!("{}.{:06}S", secs, micros)).unwrap(); }
+                else if secs != 0 { use std::fmt::Write; result.write_fmt(format_args!("{}S", secs)).unwrap(); }
             }
-            if result == "P" || result == "PT" {
-                result.push_str("T0S");
-            }
+            if result == "P" || result == "PT" { result.push_str("T0S"); }
             w.write_string(&result);
             return Ok(());
         }
-        "UUID" | "Decimal" => {
+        "UUID" | "Decimal" | "decimal.Decimal" => {
             let s: String = obj.str()?.extract()?;
             w.write_string(&s);
             return Ok(());
@@ -236,8 +184,6 @@ unsafe fn serialize_fallback(
             }
         }
     }
-
-    // enum
     if let Ok(m) = py.import("enum") {
         if let Ok(et) = m.getattr("Enum") {
             if obj.is_instance(&et).unwrap_or(false) {
@@ -247,35 +193,25 @@ unsafe fn serialize_fallback(
             }
         }
     }
-
-    // dataclass
     if obj.hasattr("__dataclass_fields__").unwrap_or(false) {
         let dict = py.import("dataclasses")?.call_method1("asdict", (&obj,))?;
         serialize_value(py, &dict, w, depth, default, allow_nan)?;
         return Ok(());
     }
-
-    // recursive default
     if !default.is_null() {
         let bound_default = Bound::from_borrowed_ptr(py, default);
         let result = bound_default.call1((&obj,))?;
         serialize_value(py, &result, w, depth, default, allow_nan)?;
         return Ok(());
     }
-
     Err(pyo3::exceptions::PyTypeError::new_err(format!(
-        "Object of type {} is not JSON serializable",
-        type_name
+        "Object of type {} is not JSON serializable", type_name
     )))
 }
 
 unsafe fn serialize_model(
-    py: Python<'_>,
-    obj: &Bound<'_, PyAny>,
-    w: &mut JsonWriter,
-    depth: usize,
-    default: *mut PyObject,
-    allow_nan: bool,
+    py: Python<'_>, obj: &Bound<'_, PyAny>, w: &mut JsonWriter,
+    depth: usize, default: *mut PyObject, allow_nan: bool,
 ) -> Result<(), PyErr> {
     let meta = obj.getattr("_meta")?;
     let fields = meta.getattr("fields")?;
@@ -286,9 +222,7 @@ unsafe fn serialize_model(
     for fr in py_iter {
         let field = fr?;
         let field_name: String = field.getattr("name")?.extract()?;
-        if !first {
-            w.write_comma();
-        }
+        if !first { w.write_comma(); }
         w.write_string(&field_name);
         w.write_colon();
         let value = obj.getattr(field_name.as_str())?;
@@ -300,21 +234,15 @@ unsafe fn serialize_model(
 }
 
 unsafe fn serialize_queryset(
-    py: Python<'_>,
-    qs: &Bound<'_, PyAny>,
-    w: &mut JsonWriter,
-    depth: usize,
-    default: *mut PyObject,
-    allow_nan: bool,
+    py: Python<'_>, qs: &Bound<'_, PyAny>, w: &mut JsonWriter,
+    depth: usize, default: *mut PyObject, allow_nan: bool,
 ) -> Result<(), PyErr> {
     let iterator = pyo3::types::PyIterator::from_object(qs)?;
     w.write_array_open();
     let mut first = true;
     for item_result in iterator {
         let item = item_result?;
-        if !first {
-            w.write_comma();
-        }
+        if !first { w.write_comma(); }
         serialize_value(py, &item, w, depth + 1, default, allow_nan)?;
         first = false;
     }
