@@ -98,6 +98,58 @@ class JSONEncoder:
         yield self.encode(o)
 
 
+class BlitzJSONEncoder(JSONEncoder):
+    """JSON encoder that uses blitzjson for serialization.
+
+    Compatible with Django REST Framework and any code that uses
+    json.JSONEncoder as a base class.
+
+    Usage:
+        import json
+        from blitzjson import BlitzJSONEncoder
+
+        json.dumps(data, cls=BlitzJSONEncoder)
+    """
+
+    def default(self, o):
+        from datetime import datetime, date, time, timedelta
+        from uuid import UUID
+        from decimal import Decimal
+
+        if isinstance(o, datetime):
+            return o.isoformat()
+        elif isinstance(o, date):
+            return o.isoformat()
+        elif isinstance(o, time):
+            return o.isoformat()
+        elif isinstance(o, timedelta):
+            total_seconds = o.total_seconds()
+            days = int(total_seconds // 86400)
+            remaining = total_seconds % 86400
+            hours = int(remaining // 3600)
+            minutes = int((remaining % 3600) // 60)
+            secs = int(remaining % 60)
+            micros = int((remaining - secs) * 1_000_000)
+            result = "P"
+            if days:
+                result += f"{days}D"
+            result += "T"
+            if hours:
+                result += f"{hours}H"
+            if minutes:
+                result += f"{minutes}M"
+            if micros:
+                result += f"{secs}.{micros:06d}S"
+            elif secs:
+                result += f"{secs}S"
+            elif result == "PT":
+                result = "PT0S"
+            return result
+        elif isinstance(o, (Decimal, UUID)):
+            return str(o)
+        return super().default(o)
+
+
 class JSONDecoder:
     """Decode JSON strings to Python objects.
 

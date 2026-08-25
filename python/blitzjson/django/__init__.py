@@ -3,15 +3,15 @@
 Provides:
 - BlitzJsonResponse: Fast JSON response using blitzjson
 - BlitzJSONEncoder: JSON encoder compatible with DRF
-- install(): Monkey-patch Python's json module with blitzjson
+- install()/uninstall(): Monkey-patch Python's json module
 """
 
 import json as _stdlib_json
-from django.http import HttpResponse
 from blitzjson._core import dumps as _dumps, loads as _loads
+from blitzjson._helpers import BlitzJSONEncoder
 
 
-class BlitzJsonResponse(HttpResponse):
+class BlitzJsonResponse:
     """Drop-in replacement for Django's JsonResponse.
 
     Uses blitzjson for serialization, which handles Django types natively:
@@ -25,6 +25,8 @@ class BlitzJsonResponse(HttpResponse):
     """
 
     def __init__(self, data, encoder=None, safe=True, json_dumps_params=None, **kwargs):
+        from django.http import HttpResponse
+
         if safe and not isinstance(data, dict):
             raise TypeError(
                 "In order to allow non-dict objects to be serialized to JSON, "
@@ -32,61 +34,10 @@ class BlitzJsonResponse(HttpResponse):
             )
         kwargs.setdefault("content_type", "application/json")
         data = _dumps(data, **(json_dumps_params or {}))
-        super().__init__(content=data, **kwargs)
+        self._http_response = HttpResponse(content=data, **kwargs)
 
-
-class BlitzJSONEncoder(_stdlib_json.JSONEncoder):
-    """JSON encoder that uses blitzjson for serialization.
-
-    Compatible with Django REST Framework and any code that uses
-    json.JSONEncoder as a base class.
-
-    Usage:
-        import json
-        from blitzjson.django import BlitzJSONEncoder
-
-        json.dumps(data, cls=BlitzJSONEncoder)
-    """
-
-    def default(self, o):
-        # Delegate to blitzjson's native type handling
-        # This is called for types that json.dumps can't handle natively
-        from datetime import datetime, date, time, timedelta
-        from uuid import UUID
-        from decimal import Decimal
-
-        if isinstance(o, datetime):
-            return o.isoformat()
-        elif isinstance(o, date):
-            return o.isoformat()
-        elif isinstance(o, time):
-            return o.isoformat()
-        elif isinstance(o, timedelta):
-            total_seconds = o.total_seconds()
-            days = int(total_seconds // 86400)
-            remaining = total_seconds % 86400
-            hours = int(remaining // 3600)
-            minutes = int((remaining % 3600) // 60)
-            secs = int(remaining % 60)
-            micros = int((remaining - secs) * 1_000_000)
-            result = "P"
-            if days:
-                result += f"{days}D"
-            result += "T"
-            if hours:
-                result += f"{hours}H"
-            if minutes:
-                result += f"{minutes}M"
-            if micros:
-                result += f"{secs}.{micros:06d}S"
-            elif secs:
-                result += f"{secs}S"
-            elif result == "PT":
-                result = "PT0S"
-            return result
-        elif isinstance(o, (Decimal, UUID)):
-            return str(o)
-        return super().default(o)
+    def __getattr__(self, name):
+        return getattr(self._http_response, name)
 
 
 def install():

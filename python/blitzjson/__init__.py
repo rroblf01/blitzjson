@@ -40,7 +40,7 @@ from blitzjson._core import (
     deserialize_direct_fn as deserialize_direct,
     deserialize_strict_fn as deserialize_strict,
 )
-from blitzjson._helpers import JSONDecodeError, JSONEncoder, JSONDecoder
+from blitzjson._helpers import JSONDecodeError, JSONEncoder, JSONDecoder, BlitzJSONEncoder
 
 
 def dumps(obj, skipkeys=False, ensure_ascii=True, check_circular=True,
@@ -116,12 +116,30 @@ __all__ = [
 
 
 def install():
-    """Monkey-patch Python's json module with blitzjson."""
-    from blitzjson.django import install as _install
-    _install()
+    """Monkey-patch Python's json module with blitzjson.
+
+    After calling this, `import json` will use blitzjson for all
+    serialization/deserialization operations.
+
+    Usage:
+        import blitzjson
+        blitzjson.install()
+
+    WARNING: This modifies the global json module. Use with caution.
+    """
+    import json as _stdlib_json
+    _stdlib_json.dumps = _rust_dumps
+    _stdlib_json.loads = deserialize_strict
+    _stdlib_json.dump = lambda obj, fp, **kwargs: fp.write(_rust_dumps(obj, **kwargs))
+    _stdlib_json.load = lambda fp, **kwargs: deserialize_strict(fp.read(), **kwargs)
+    _stdlib_json.JSONEncoder = BlitzJSONEncoder
 
 
 def uninstall():
-    """Revert monkey-patching done by install()."""
-    from blitzjson.django import uninstall as _uninstall
-    _uninstall()
+    """Revert monkey-patching done by install().
+
+    Restores the original json module functions.
+    """
+    import importlib
+    import json as _stdlib_json
+    importlib.reload(_stdlib_json)
