@@ -40,6 +40,20 @@ unsafe fn serialize_value(
         w.write_bool(b);
         return Ok(());
     }
+    if let Ok(s) = obj.extract::<String>() {
+        w.write_string(&s);
+        return Ok(());
+    }
+    let type_name = obj
+        .get_type()
+        .name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if type_name == "Decimal" || type_name == "decimal.Decimal" || type_name == "UUID" {
+        let s: String = obj.str()?.extract()?;
+        w.write_string(&s);
+        return Ok(());
+    }
     if let Ok(i) = obj.extract::<i64>() {
         w.write_i64(i);
         return Ok(());
@@ -64,22 +78,35 @@ unsafe fn serialize_value(
         }
         return Ok(());
     }
-    if let Ok(s) = obj.extract::<String>() {
-        w.write_string(&s);
-        return Ok(());
-    }
     if let Ok(dict) = obj.cast::<PyDict>() {
         w.write_object_open();
-        let mut first = true;
-        for (k, v) in dict.iter() {
-            if !first {
-                w.write_comma();
+        if sort_keys {
+            let mut items: Vec<(String, Bound<'_, PyAny>)> = Vec::new();
+            for (k, v) in dict.iter() {
+                let key: String = k.extract()?;
+                items.push((key, v));
             }
-            let key: String = k.extract()?;
-            w.write_string(&key);
-            w.write_colon();
-            serialize_value(py, &v, w, depth + 1, default, allow_nan, sort_keys)?;
-            first = false;
+            items.sort_by(|a, b| a.0.cmp(&b.0));
+            for (i, (key, v)) in items.iter().enumerate() {
+                if i > 0 {
+                    w.write_comma();
+                }
+                w.write_string(key);
+                w.write_colon();
+                serialize_value(py, v, w, depth + 1, default, allow_nan, sort_keys)?;
+            }
+        } else {
+            let mut first = true;
+            for (k, v) in dict.iter() {
+                if !first {
+                    w.write_comma();
+                }
+                let key: String = k.extract()?;
+                w.write_string(&key);
+                w.write_colon();
+                serialize_value(py, &v, w, depth + 1, default, allow_nan, sort_keys)?;
+                first = false;
+            }
         }
         w.write_object_close();
         return Ok(());
@@ -107,18 +134,51 @@ unsafe fn serialize_value(
         return Ok(());
     }
     if let Ok(set) = obj.cast::<pyo3::types::PySet>() {
-        let mut items: Vec<String> = Vec::new();
-        for item in set.iter() {
-            items.push(item.str()?.to_string());
-        }
-        items.sort();
+        let mut items: Vec<Bound<'_, PyAny>> = set.iter().collect();
+        items.sort_by(|a, b| {
+            a.str()
+                .unwrap()
+                .to_string()
+                .cmp(&b.str().unwrap().to_string())
+        });
         w.write_array_open();
-        for (i, _) in items.iter().enumerate() {
+        for (i, item) in items.iter().enumerate() {
             if i > 0 {
                 w.write_comma();
             }
+            serialize_value(py, item, w, depth + 1, default, allow_nan, sort_keys)?;
         }
         w.write_array_close();
+        return Ok(());
+    }
+    if let Ok(fset) = obj.cast::<pyo3::types::PyFrozenSet>() {
+        let mut items: Vec<Bound<'_, PyAny>> = fset.iter().collect();
+        items.sort_by(|a, b| {
+            a.str()
+                .unwrap()
+                .to_string()
+                .cmp(&b.str().unwrap().to_string())
+        });
+        w.write_array_open();
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                w.write_comma();
+            }
+            serialize_value(py, item, w, depth + 1, default, allow_nan, sort_keys)?;
+        }
+        w.write_array_close();
+        return Ok(());
+    }
+    if let Ok(bytes) = obj.cast::<pyo3::types::PyBytes>() {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes());
+        w.write_string(&encoded);
+        return Ok(());
+    }
+    if let Ok(ba) = obj.cast::<pyo3::types::PyByteArray>() {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(ba.as_bytes());
+        w.write_string(&encoded);
         return Ok(());
     }
     serialize_fallback(py, obj, w, depth, default, allow_nan, sort_keys)
@@ -183,11 +243,6 @@ unsafe fn serialize_fallback(
                 result.push_str("T0S");
             }
             w.write_string(&result);
-            return Ok(());
-        }
-        "UUID" | "Decimal" | "decimal.Decimal" => {
-            let s: String = obj.str()?.extract()?;
-            w.write_string(&s);
             return Ok(());
         }
         _ => {}

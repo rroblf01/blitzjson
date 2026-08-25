@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"] }
 itoa = "1.0"
 ryu = "1.0"
+base64 = "0.22"
 
 [profile.release]
 lto = true
