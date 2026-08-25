@@ -35,6 +35,33 @@ import blitzjson as json
 json.dumps({"created": datetime.now()})  # Works!
 ```
 
+## Monkey-patching (try before you commit)
+
+If you want to test blitzjson in your existing project without changing any `import json` statements, use the `install()` function to monkey-patch Python's built-in `json` module:
+
+```python
+# In your settings.py or at the top of manage.py
+import blitzjson
+blitzjson.install()
+
+# Now ALL code that uses `import json` will use blitzjson instead
+import json
+json.dumps({"created": datetime.now()})  # Works! No TypeError!
+```
+
+Or test it interactively:
+
+```python
+>>> import blitzjson
+>>> blitzjson.install()
+>>> import json
+>>> json.dumps({"created": datetime.now(), "uuid": uuid4()})
+'{"created": "2024-01-15T10:30:45+00:00", "uuid": "550e8400-e29b-41d4-a716-446655440000"}'
+
+>>> # Revert when done testing
+>>> blitzjson.uninstall()
+```
+
 ## Supported Types
 
 | Python Type | JSON Output | Example |
@@ -133,7 +160,7 @@ API response (50 users)                 44.9µs         19.6µs      2.3x
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.10+
 - No Rust installation required (pre-built wheels)
 
 ## License
