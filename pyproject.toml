@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "blitzjson"
 version = "0.1.0"
 description = "Drop-in replacement for json with native Django type support. Rust-powered via PyO3."
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
 authors = [
@@ -15,6 +15,7 @@ authors = [
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
