@@ -97,6 +97,17 @@ unsafe fn serialize_value(
         w.write_array_close();
         return Ok(());
     }
+    // Decimal/UUID: check before numeric types (they can be extracted as f64)
+    let type_name = obj
+        .get_type()
+        .name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if type_name == "Decimal" || type_name == "decimal.Decimal" || type_name == "UUID" {
+        let s: String = obj.str()?.extract()?;
+        w.write_string(&s);
+        return Ok(());
+    }
     // Integers: try i64 first (most common), then u64 for large positives
     if let Ok(i) = obj.extract::<i64>() {
         w.write_i64(i);
