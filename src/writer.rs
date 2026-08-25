@@ -93,7 +93,7 @@ impl JsonWriter {
                 }
                 b if b >= 0x80 => {
                     // Decode UTF-8 sequence to get the Unicode code point
-                    let start = i;
+                    let _start = i;
                     i += 1;
                     let mut cp = (b & 0x1F) as u32;
                     while i < bytes.len() && (bytes[i] & 0xC0) == 0x80 {

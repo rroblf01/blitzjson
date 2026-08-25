@@ -11,6 +11,12 @@ struct DjangoTypes {
     model: *mut PyObject,
     queryset: *mut PyObject,
     enum_type: *mut PyObject,
+    datetime_type: *mut PyObject,
+    date_type: *mut PyObject,
+    time_type: *mut PyObject,
+    timedelta_type: *mut PyObject,
+    uuid_type: *mut PyObject,
+    decimal_type: *mut PyObject,
 }
 unsafe impl Send for DjangoTypes {}
 unsafe impl Sync for DjangoTypes {}
@@ -26,11 +32,29 @@ unsafe fn get_django_types(py: Python<'_>) -> Option<&'static DjangoTypes> {
         .and_then(|m| m.getattr("QuerySet").ok()).map(|o| o.as_ptr());
     let enum_type = py.import("enum").ok()
         .and_then(|m| m.getattr("Enum").ok()).map(|o| o.as_ptr());
+    let datetime_type = py.import("datetime").ok()
+        .and_then(|m| m.getattr("datetime").ok()).map(|o| o.as_ptr());
+    let date_type = py.import("datetime").ok()
+        .and_then(|m| m.getattr("date").ok()).map(|o| o.as_ptr());
+    let time_type = py.import("datetime").ok()
+        .and_then(|m| m.getattr("time").ok()).map(|o| o.as_ptr());
+    let timedelta_type = py.import("datetime").ok()
+        .and_then(|m| m.getattr("timedelta").ok()).map(|o| o.as_ptr());
+    let uuid_type = py.import("uuid").ok()
+        .and_then(|m| m.getattr("UUID").ok()).map(|o| o.as_ptr());
+    let decimal_type = py.import("decimal").ok()
+        .and_then(|m| m.getattr("Decimal").ok()).map(|o| o.as_ptr());
     DJANGO_TYPES = Some(DjangoTypes {
         promise: promise.unwrap_or(std::ptr::null_mut()),
         model: model.unwrap_or(std::ptr::null_mut()),
         queryset: queryset.unwrap_or(std::ptr::null_mut()),
         enum_type: enum_type.unwrap_or(std::ptr::null_mut()),
+        datetime_type: datetime_type.unwrap_or(std::ptr::null_mut()),
+        date_type: date_type.unwrap_or(std::ptr::null_mut()),
+        time_type: time_type.unwrap_or(std::ptr::null_mut()),
+        timedelta_type: timedelta_type.unwrap_or(std::ptr::null_mut()),
+        uuid_type: uuid_type.unwrap_or(std::ptr::null_mut()),
+        decimal_type: decimal_type.unwrap_or(std::ptr::null_mut()),
     });
     DJANGO_TYPES.as_ref()
 }
@@ -249,16 +273,32 @@ unsafe fn ffi_serialize_fallback(
     depth: usize, default: *mut PyObject, allow_nan: bool,
 ) -> Result<(), PyErr> {
     let obj_bound = Bound::from_borrowed_ptr(py, obj);
-    let type_name = obj_bound.get_type().name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
 
-    match type_name.as_str() {
-        "datetime" | "date" | "time" => {
+    // Fast path: use cached type pointers for comparison (no allocation)
+    if let Some(dt) = get_django_types(py) {
+        // datetime (check before date since datetime is a subclass of date)
+        if !dt.datetime_type.is_null() && PyObject_IsInstance(obj, dt.datetime_type) == 1 {
             let iso = obj_bound.call_method0("isoformat")?;
             let s: String = iso.extract()?;
             w.write_string(&s);
             return Ok(());
         }
-        "timedelta" => {
+        // date
+        if !dt.date_type.is_null() && PyObject_IsInstance(obj, dt.date_type) == 1 {
+            let iso = obj_bound.call_method0("isoformat")?;
+            let s: String = iso.extract()?;
+            w.write_string(&s);
+            return Ok(());
+        }
+        // time
+        if !dt.time_type.is_null() && PyObject_IsInstance(obj, dt.time_type) == 1 {
+            let iso = obj_bound.call_method0("isoformat")?;
+            let s: String = iso.extract()?;
+            w.write_string(&s);
+            return Ok(());
+        }
+        // timedelta
+        if !dt.timedelta_type.is_null() && PyObject_IsInstance(obj, dt.timedelta_type) == 1 {
             let days: i64 = obj_bound.getattr("days")?.extract()?;
             let seconds: i64 = obj_bound.getattr("seconds")?.extract()?;
             let microseconds: i64 = obj_bound.getattr("microseconds")?.extract()?;
@@ -280,26 +320,33 @@ unsafe fn ffi_serialize_fallback(
             w.write_string(&result);
             return Ok(());
         }
-        "UUID" | "Decimal" => {
+        // UUID
+        if !dt.uuid_type.is_null() && PyObject_IsInstance(obj, dt.uuid_type) == 1 {
             let s: String = obj_bound.str()?.extract()?;
             w.write_string(&s);
             return Ok(());
         }
-        _ => {}
-    }
-
-    if let Some(dt) = get_django_types(py) {
+        // Decimal
+        if !dt.decimal_type.is_null() && PyObject_IsInstance(obj, dt.decimal_type) == 1 {
+            let s: String = obj_bound.str()?.extract()?;
+            w.write_string(&s);
+            return Ok(());
+        }
+        // Promise
         if !dt.promise.is_null() && PyObject_IsInstance(obj, dt.promise) == 1 {
             let s: String = obj_bound.str()?.extract()?;
             w.write_string(&s);
             return Ok(());
         }
+        // Model
         if !dt.model.is_null() && PyObject_IsInstance(obj, dt.model) == 1 {
             return ffi_serialize_model(py, &obj_bound, w, depth, default, allow_nan);
         }
+        // QuerySet
         if !dt.queryset.is_null() && PyObject_IsInstance(obj, dt.queryset) == 1 {
             return ffi_serialize_queryset(py, &obj_bound, w, depth, default, allow_nan);
         }
+        // Enum
         if !dt.enum_type.is_null() && PyObject_IsInstance(obj, dt.enum_type) == 1 {
             let val = obj_bound.getattr("value")?;
             ffi_serialize(py, val.as_ptr(), w, depth, default, allow_nan)?;
@@ -307,12 +354,14 @@ unsafe fn ffi_serialize_fallback(
         }
     }
 
+    // dataclass
     if obj_bound.hasattr("__dataclass_fields__").unwrap_or(false) {
         let dict = py.import("dataclasses")?.call_method1("asdict", (&obj_bound,))?;
         ffi_serialize(py, dict.as_ptr(), w, depth, default, allow_nan)?;
         return Ok(());
     }
 
+    // Recursive default
     if !default.is_null() {
         let bound_default = Bound::from_borrowed_ptr(py, default);
         let result = bound_default.call1((&obj_bound,))?;
@@ -320,6 +369,8 @@ unsafe fn ffi_serialize_fallback(
         return Ok(());
     }
 
+    // Last resort: use type name for error message only
+    let type_name = obj_bound.get_type().name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     Err(pyo3::exceptions::PyTypeError::new_err(format!(
         "Object of type {} is not JSON serializable", type_name
     )))
