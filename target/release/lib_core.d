@@ -1,1 +1,0 @@
-/home/sheik/Documentos/blitzjson/target/release/lib_core.so: /home/sheik/Documentos/blitzjson/src/deserializer.rs /home/sheik/Documentos/blitzjson/src/ffi_serializer.rs /home/sheik/Documentos/blitzjson/src/lib.rs /home/sheik/Documentos/blitzjson/src/writer.rs
