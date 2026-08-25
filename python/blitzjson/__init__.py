@@ -36,6 +36,8 @@ from blitzjson._core import (
     dumpb,
     dump_queryset,
     dump_queryset_bytes,
+    stream_dump_queryset,
+    stream_dump_queryset_jsonl,
 )
 
 # Alias dumpb to dump_bytes for consistency

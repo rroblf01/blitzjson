@@ -135,6 +135,72 @@ fn dump_queryset_bytes(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<
     Ok(writer.into_bytes())
 }
 
+/// Stream a Django QuerySet to a file object in chunks.
+/// Memory-efficient for large QuerySets (100k+ records).
+#[pyfunction]
+#[pyo3(signature = (queryset, fp, chunk_size=1000))]
+fn stream_dump_queryset(
+    py: Python<'_>,
+    queryset: &Bound<'_, PyAny>,
+    fp: &Bound<'_, PyAny>,
+    chunk_size: usize,
+) -> PyResult<()> {
+    let iterator = pyo3::types::PyIterator::from_object(queryset)?;
+    let mut writer = JsonWriter::new(chunk_size * 128);
+    let mut first = true;
+
+    writer.write_array_open();
+
+    for item_result in iterator {
+        let item = item_result?;
+        if !first { writer.buf_mut().push(','); }
+        unsafe {
+            ffi_serializer::ffi_serialize(py, item.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+        }
+        first = false;
+        if writer.buf_mut().len() > chunk_size * 128 {
+            fp.call_method1("write", (writer.buf_mut().as_str(),))?;
+            writer.buf_mut().clear();
+        }
+    }
+
+    writer.write_array_close();
+    if !writer.buf_mut().is_empty() {
+        fp.call_method1("write", (writer.buf_mut().as_str(),))?;
+    }
+    Ok(())
+}
+
+/// Stream a Django QuerySet as JSON lines (one JSON object per line).
+#[pyfunction]
+#[pyo3(signature = (queryset, fp, chunk_size=1000))]
+fn stream_dump_queryset_jsonl(
+    py: Python<'_>,
+    queryset: &Bound<'_, PyAny>,
+    fp: &Bound<'_, PyAny>,
+    chunk_size: usize,
+) -> PyResult<()> {
+    let iterator = pyo3::types::PyIterator::from_object(queryset)?;
+    let mut writer = JsonWriter::new(chunk_size * 128);
+
+    for item_result in iterator {
+        let item = item_result?;
+        unsafe {
+            ffi_serializer::ffi_serialize(py, item.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+        }
+        writer.buf_mut().push('\n');
+        if writer.buf_mut().len() > chunk_size * 128 {
+            fp.call_method1("write", (writer.buf_mut().as_str(),))?;
+            writer.buf_mut().clear();
+        }
+    }
+
+    if !writer.buf_mut().is_empty() {
+        fp.call_method1("write", (writer.buf_mut().as_str(),))?;
+    }
+    Ok(())
+}
+
 #[pymodule]
 #[pyo3(name = "_core")]
 fn blitzjson(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -145,6 +211,8 @@ fn blitzjson(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dumpb, m)?)?;
     m.add_function(wrap_pyfunction!(dump_queryset, m)?)?;
     m.add_function(wrap_pyfunction!(dump_queryset_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(stream_dump_queryset, m)?)?;
+    m.add_function(wrap_pyfunction!(stream_dump_queryset_jsonl, m)?)?;
     m.add("__version__", "0.1.0")?;
     Ok(())
 }
