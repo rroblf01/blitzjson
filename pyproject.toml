@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "Drop-in replacement for json with native Django type support. Rust-powered via PyO3."
 requires-python = ">=3.11"
 license = "MIT"
+readme = "README.md"
+authors = [
+    { name = "Ricardo Robles Fernández" },
+]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -16,8 +20,15 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Framework :: Django",
     "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/rroblf01/blitzjson"
+Repository = "https://github.com/rroblf01/blitzjson"
+Issues = "https://github.com/rroblf01/blitzjson/issues"
 
 [project.optional-dependencies]
 django = ["django>=4.2"]

@@ -1,12 +1,14 @@
 # blitzjson
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Drop-in replacement for Python's `json` module with native Django type support. Built with Rust via PyO3 for maximum performance.
 
 ## Features
 
 - **Drop-in replacement**: Same API as `json.dumps()`, `json.loads()`, etc.
 - **Native Django types**: Handles `datetime`, `date`, `time`, `timedelta`, `UUID`, `Decimal`, `QuerySet`, `Model`, `Promise` without custom encoders
-- **Rust-powered**: Direct serialization to JSON buffer without intermediate Python objects
+- **Rust-powered**: Direct serialization to JSON buffer via CPython FFI, no intermediate Python objects
 - **Zero dependencies**: No runtime Python dependencies required
 
 ## Installation
@@ -90,23 +92,19 @@ Optimized serialization for Django QuerySets.
 
 ## Benchmarks
 
-vs `json` + `DjangoJSONEncoder`:
+vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64):
 
 ```
 Benchmark                           json+DJE    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 2.2µs        1.9µs      1.1x
-Datetime dict                          9.3µs        5.6µs      1.7x
-UUID dict                              6.1µs        2.7µs      2.3x
-Decimal dict                           3.7µs        3.5µs      1.1x
+Simple dict (4 fields)                 2.5µs        0.4µs      6.6x
+Nested dict (deep)                     5.1µs        1.6µs      3.2x
+Large list (1000 items)              697.3µs      333.8µs      2.1x
+Datetime dict                         10.9µs        5.8µs      1.9x
+UUID dict                              8.3µs        4.2µs      2.0x
+Decimal dict                           5.1µs        1.3µs      4.1x
+Mixed dict (all types)                 7.8µs        3.6µs      2.2x
 ```
-
-## Performance Notes
-
-blitzjson provides the most benefit when serializing Django data:
-- **QuerySets with datetime/UUID/Decimal fields**: Significant speedup vs `json` + `DjangoJSONEncoder`
-- **Pure Python dicts/lists**: Similar performance to `json` (Python↔Rust bridge overhead)
-- **For maximum speed**: Consider `orjson` for simple data types (it's faster for pure Python structures)
 
 ## Requirements
 
@@ -115,4 +113,4 @@ blitzjson provides the most benefit when serializing Django data:
 
 ## License
 
-MIT
+MIT - [Ricardo Robles Fernández](https://github.com/rroblf01)
