@@ -1,4 +1,4 @@
-/// Direct JSON writer with ensure_ascii, indent, sort_keys, and separators support.
+/// Direct JSON writer optimized for speed.
 pub struct JsonWriter {
     buf: String,
     ensure_ascii: bool,
@@ -40,7 +40,7 @@ impl JsonWriter {
         }
     }
 
-    /// Fast JSON string escape. Copies safe segments at once.
+    /// Fast JSON string escape. Copies safe segments at once using unsafe ptr copy.
     #[inline(always)]
     pub fn write_string(&mut self, s: &str) {
         self.buf.push('"');
@@ -68,14 +68,13 @@ impl JsonWriter {
                         self.buf.push(HEX_CHARS[(c & 0x0F) as usize]);
                     }
                     _ => {
-                        // Multi-byte UTF-8: decode codepoint
                         let mut cp = (b & 0x1F) as u32;
                         i += 1;
                         while i < len && (bytes[i] & 0xC0) == 0x80 {
                             cp = (cp << 6) | ((bytes[i] & 0x3F) as u32);
                             i += 1;
                         }
-                        // i now points to the byte AFTER the sequence
+                        start = i;
                         if self.ensure_ascii {
                             self.buf.push_str("\\u");
                             self.buf.push(HEX_CHARS[((cp >> 12) & 0x0F) as usize]);
@@ -85,7 +84,6 @@ impl JsonWriter {
                         } else if let Some(c) = char::from_u32(cp) {
                             self.buf.push(c);
                         }
-                        start = i;
                         continue;
                     }
                 }
