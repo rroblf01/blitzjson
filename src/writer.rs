@@ -1,13 +1,30 @@
-/// Direct JSON writer that serializes Python objects to a JSON buffer.
-/// Optimized with itoa, ryu, and fast ASCII string escaping.
+/// Direct JSON writer with ensure_ascii, indent, and sort_keys support.
 pub struct JsonWriter {
     buf: String,
+    ensure_ascii: bool,
+    indent: Option<u8>,
+    indent_level: usize,
+    sort_keys: bool,
 }
 
 impl JsonWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
             buf: String::with_capacity(capacity),
+            ensure_ascii: false,
+            indent: None,
+            indent_level: 0,
+            sort_keys: false,
+        }
+    }
+
+    pub fn with_options(capacity: usize, ensure_ascii: bool, indent: Option<u8>, sort_keys: bool) -> Self {
+        Self {
+            buf: String::with_capacity(capacity),
+            ensure_ascii,
+            indent,
+            indent_level: 0,
+            sort_keys,
         }
     }
 
@@ -23,8 +40,36 @@ impl JsonWriter {
         &mut self.buf
     }
 
-    /// Fast string escape: scan ASCII bytes directly, handle escapes inline.
-    /// For non-ASCII or control chars, fall back to per-char processing.
+    pub fn ensure_ascii(&self) -> bool {
+        self.ensure_ascii
+    }
+
+    pub fn sort_keys(&self) -> bool {
+        self.sort_keys
+    }
+
+    pub fn is_pretty(&self) -> bool {
+        self.indent.is_some()
+    }
+
+    fn write_indent(&mut self) {
+        if let Some(indent) = self.indent {
+            self.buf.push('\n');
+            for _ in 0..self.indent_level {
+                for _ in 0..indent {
+                    self.buf.push(' ');
+                }
+            }
+        }
+    }
+
+    fn write_newline_or_space(&mut self) {
+        if self.indent.is_some() {
+            self.buf.push('\n');
+        }
+    }
+
+    /// Write a JSON string with proper escaping.
     #[inline]
     pub fn write_string(&mut self, s: &str) {
         self.buf.push('"');
@@ -41,24 +86,35 @@ impl JsonWriter {
                 0x08 => { self.buf.push_str("\\b"); i += 1; }
                 0x0C => { self.buf.push_str("\\f"); i += 1; }
                 b if b < 0x20 => {
-                    // Control character: write \u00XX
                     self.buf.push_str("\\u00");
                     self.buf.push(HEX_CHARS[(b >> 4) as usize]);
                     self.buf.push(HEX_CHARS[(b & 0x0F) as usize]);
                     i += 1;
                 }
                 b if b >= 0x80 => {
-                    // Non-ASCII: scan ahead for the full UTF-8 char and push it
+                    // Decode UTF-8 sequence to get the Unicode code point
                     let start = i;
                     i += 1;
+                    let mut cp = (b & 0x1F) as u32;
                     while i < bytes.len() && (bytes[i] & 0xC0) == 0x80 {
+                        cp = (cp << 6) | ((bytes[i] & 0x3F) as u32);
                         i += 1;
                     }
-                    // SAFETY: we've verified valid UTF-8 boundaries
-                    self.buf.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[start..i]) });
+                    if self.ensure_ascii {
+                        // Encode as \uXXXX
+                        self.buf.push_str("\\u");
+                        self.buf.push(HEX_CHARS[((cp >> 12) & 0x0F) as usize]);
+                        self.buf.push(HEX_CHARS[((cp >> 8) & 0x0F) as usize]);
+                        self.buf.push(HEX_CHARS[((cp >> 4) & 0x0F) as usize]);
+                        self.buf.push(HEX_CHARS[(cp & 0x0F) as usize]);
+                    } else {
+                        // Push UTF-8 directly
+                        if let Some(c) = char::from_u32(cp) {
+                            self.buf.push(c);
+                        }
+                    }
                 }
                 _ => {
-                    // Fast path: safe ASCII byte, push directly
                     self.buf.push(b as char);
                     i += 1;
                 }
@@ -99,40 +155,52 @@ impl JsonWriter {
             self.buf.push_str("null");
         } else {
             let mut buf = ryu::Buffer::new();
-            let s = buf.format(f);
-            // ryu always includes a decimal point or 'e' for floats, so no need to check
-            self.buf.push_str(s);
+            self.buf.push_str(buf.format(f));
         }
     }
 
-    #[inline]
     pub fn write_array_open(&mut self) {
         self.buf.push('[');
+        if self.indent.is_some() {
+            self.indent_level += 1;
+        }
     }
 
-    #[inline]
     pub fn write_array_close(&mut self) {
+        if self.indent.is_some() {
+            self.indent_level -= 1;
+            self.write_indent();
+        }
         self.buf.push(']');
     }
 
-    #[inline]
     pub fn write_object_open(&mut self) {
         self.buf.push('{');
+        if self.indent.is_some() {
+            self.indent_level += 1;
+        }
     }
 
-    #[inline]
     pub fn write_object_close(&mut self) {
+        if self.indent.is_some() {
+            self.indent_level -= 1;
+            self.write_indent();
+        }
         self.buf.push('}');
     }
 
-    #[inline]
     pub fn write_comma(&mut self) {
         self.buf.push(',');
+        if self.indent.is_some() {
+            self.write_indent();
+        }
     }
 
-    #[inline]
     pub fn write_colon(&mut self) {
         self.buf.push(':');
+        if self.indent.is_some() {
+            self.buf.push(' ');
+        }
     }
 }
 
