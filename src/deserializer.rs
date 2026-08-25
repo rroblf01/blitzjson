@@ -53,9 +53,7 @@ impl<'a> JsonParser<'a> {
     }
 
     #[inline(always)]
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
-    }
+    fn peek(&self) -> Option<u8> { self.bytes.get(self.pos).copied() }
 
     #[inline(always)]
     fn next_byte(&mut self) -> Option<u8> {
@@ -66,22 +64,15 @@ impl<'a> JsonParser<'a> {
 
     fn error(&self, msg: &str) -> PyErr {
         let row = self.bytes[..self.pos].iter().filter(|&&b| b == b'\n').count() + 1;
-        let last_newline = self.bytes[..self.pos].iter().rposition(|&b| b == b'\n');
-        let col = match last_newline {
-            Some(pos) => self.pos - pos,
-            None => self.pos + 1,
-        };
+        let col = self.bytes[..self.pos].iter().rposition(|&b| b == b'\n').map_or(self.pos + 1, |p| self.pos - p);
         pyo3::exceptions::PyValueError::new_err(format!("{} at row {}, column {}", msg, row, col))
     }
 
     #[inline(always)]
     fn parse_value<'py>(
-        &mut self,
-        py: Python<'py>,
-        oh: Option<&Bound<'py, PyAny>>,
-        oph: Option<&Bound<'py, PyAny>>,
-        pf: Option<&Bound<'py, PyAny>>,
-        pi: Option<&Bound<'py, PyAny>>,
+        &mut self, py: Python<'py>,
+        oh: Option<&Bound<'py, PyAny>>, oph: Option<&Bound<'py, PyAny>>,
+        pf: Option<&Bound<'py, PyAny>>, pi: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         self.skip_whitespace();
         match self.peek() {
@@ -91,7 +82,7 @@ impl<'a> JsonParser<'a> {
             Some(b't') | Some(b'f') => self.parse_bool(py),
             Some(b'n') => self.parse_null(py),
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(py, pf, pi),
-            _ => Err(self.error("Invalid JSON value")),
+            _ => Err(self.error("Invalid JSON")),
         }
     }
 
