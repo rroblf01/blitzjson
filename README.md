@@ -94,16 +94,30 @@ Optimized serialization for Django QuerySets.
 
 vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64):
 
+### dumps
+
 ```
 Benchmark                           json+DJE    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 2.5µs        0.4µs      6.6x
-Nested dict (deep)                     5.1µs        1.6µs      3.2x
-Large list (1000 items)              697.3µs      333.8µs      2.1x
-Datetime dict                         10.9µs        5.8µs      1.9x
-UUID dict                              8.3µs        4.2µs      2.0x
-Decimal dict                           5.1µs        1.3µs      4.1x
-Mixed dict (all types)                 7.8µs        3.6µs      2.2x
+Simple dict (4 fields)                 2.5µs        0.4µs      5.6x
+Nested dict (deep)                     5.3µs        1.2µs      4.3x
+Large list (1000 items)              729.3µs      172.7µs      4.2x
+String-heavy dict (20 keys)            4.4µs        1.2µs      3.5x
+Datetime dict                          9.4µs        4.5µs      2.1x
+UUID dict                              6.5µs        3.0µs      2.1x
+Decimal dict                           4.1µs        0.9µs      4.7x
+Mixed dict (all types)                 6.7µs        2.6µs      2.6x
+```
+
+### loads
+
+```
+Benchmark                               json    blitzjson    Speedup
+------------------------------------------------------------------------
+Simple dict (4 fields)                 1.6µs        0.6µs      2.6x
+Nested dict (deep)                     4.5µs        3.1µs      1.4x
+Large list (1000 items)              674.4µs      483.6µs      1.4x
+String-heavy dict (20 keys)            3.8µs        3.2µs      1.2x
 ```
 
 ## Requirements
