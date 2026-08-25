@@ -1,6 +1,6 @@
+mod deserializer;
 mod ffi_serializer;
 mod writer;
-mod deserializer;
 
 use pyo3::prelude::*;
 use writer::JsonWriter;
@@ -31,15 +31,23 @@ fn dumps<'py>(
         Some(seps) => {
             let item: String = seps.get_item(0)?.extract()?;
             let key: String = seps.get_item(1)?.extract()?;
-            (Box::leak(item.into_boxed_str()), Box::leak(key.into_boxed_str()))
+            (
+                Box::leak(item.into_boxed_str()),
+                Box::leak(key.into_boxed_str()),
+            )
         }
         None => {
             // json.dumps uses compact item separator when indent is set,
             // but key separator is always ": " (with space)
-            if indent_val.is_some() { (",", ": ") } else { (", ", ": ") }
+            if indent_val.is_some() {
+                (",", ": ")
+            } else {
+                (", ", ": ")
+            }
         }
     };
-    let mut writer = JsonWriter::with_separators(1024, ensure_ascii, indent_val, sort_keys, item_sep, key_sep);
+    let mut writer =
+        JsonWriter::with_separators(1024, ensure_ascii, indent_val, sort_keys, item_sep, key_sep);
     let default_obj = default.map(|d| d.as_ptr()).unwrap_or(std::ptr::null_mut());
 
     let result = unsafe {
@@ -50,9 +58,17 @@ fn dumps<'py>(
         Err(e) => {
             if let Some(fallback) = default {
                 let result = fallback.call1((obj,))?;
-                let mut writer2 = JsonWriter::with_options(1024, ensure_ascii, indent_val, sort_keys);
+                let mut writer2 =
+                    JsonWriter::with_options(1024, ensure_ascii, indent_val, sort_keys);
                 unsafe {
-                    ffi_serializer::ffi_serialize(py, result.as_ptr(), &mut writer2, 0, default_obj, allow_nan)?;
+                    ffi_serializer::ffi_serialize(
+                        py,
+                        result.as_ptr(),
+                        &mut writer2,
+                        0,
+                        default_obj,
+                        allow_nan,
+                    )?;
                 }
                 Ok(writer2.into_string())
             } else {
@@ -90,7 +106,14 @@ fn loads<'py>(
     } else {
         s.extract()?
     };
-    deserializer::deserialize_direct(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_direct(
+        py,
+        &json_str,
+        object_hook,
+        object_pairs_hook,
+        parse_float,
+        parse_int,
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -115,7 +138,20 @@ fn dump<'py>(
     sort_keys: bool,
     _kw: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<()> {
-    let s = dumps(py, obj, skipkeys, ensure_ascii, check_circular, allow_nan, cls, indent, separators, default, sort_keys, None)?;
+    let s = dumps(
+        py,
+        obj,
+        skipkeys,
+        ensure_ascii,
+        check_circular,
+        allow_nan,
+        cls,
+        indent,
+        separators,
+        default,
+        sort_keys,
+        None,
+    )?;
     fp.call_method1("write", (&s,))?;
     Ok(())
 }
@@ -141,7 +177,14 @@ fn load<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let content: String = fp.call_method0("read")?.extract()?;
     let json_str = content.trim();
-    deserializer::deserialize_direct(py, json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_direct(
+        py,
+        json_str,
+        object_hook,
+        object_pairs_hook,
+        parse_float,
+        parse_int,
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -154,7 +197,14 @@ fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, pretty: bool) -> PyResult<Vec<u
     let indent = if pretty { Some(2) } else { None };
     let mut writer = JsonWriter::with_options(1024, false, indent, false);
     unsafe {
-        ffi_serializer::ffi_serialize(py, obj.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+        ffi_serializer::ffi_serialize(
+            py,
+            obj.as_ptr(),
+            &mut writer,
+            0,
+            std::ptr::null_mut(),
+            true,
+        )?;
     }
     Ok(writer.into_bytes())
 }
@@ -163,7 +213,14 @@ fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, pretty: bool) -> PyResult<Vec<u
 fn dump_queryset(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<String> {
     let mut writer = JsonWriter::new(1024);
     unsafe {
-        ffi_serializer::ffi_serialize(py, queryset.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+        ffi_serializer::ffi_serialize(
+            py,
+            queryset.as_ptr(),
+            &mut writer,
+            0,
+            std::ptr::null_mut(),
+            true,
+        )?;
     }
     Ok(writer.into_string())
 }
@@ -172,7 +229,14 @@ fn dump_queryset(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<String
 fn dump_queryset_bytes(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     let mut writer = JsonWriter::new(1024);
     unsafe {
-        ffi_serializer::ffi_serialize(py, queryset.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+        ffi_serializer::ffi_serialize(
+            py,
+            queryset.as_ptr(),
+            &mut writer,
+            0,
+            std::ptr::null_mut(),
+            true,
+        )?;
     }
     Ok(writer.into_bytes())
 }
@@ -191,9 +255,18 @@ fn stream_dump_queryset(
     writer.write_array_open();
     for item_result in iterator {
         let item = item_result?;
-        if !first { writer.buf_mut().push(','); }
+        if !first {
+            writer.buf_mut().push(',');
+        }
         unsafe {
-            ffi_serializer::ffi_serialize(py, item.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+            ffi_serializer::ffi_serialize(
+                py,
+                item.as_ptr(),
+                &mut writer,
+                0,
+                std::ptr::null_mut(),
+                true,
+            )?;
         }
         first = false;
         if writer.buf_mut().len() > chunk_size * 128 {
@@ -221,7 +294,14 @@ fn stream_dump_queryset_jsonl(
     for item_result in iterator {
         let item = item_result?;
         unsafe {
-            ffi_serializer::ffi_serialize(py, item.as_ptr(), &mut writer, 0, std::ptr::null_mut(), true)?;
+            ffi_serializer::ffi_serialize(
+                py,
+                item.as_ptr(),
+                &mut writer,
+                0,
+                std::ptr::null_mut(),
+                true,
+            )?;
         }
         writer.buf_mut().push('\n');
         if writer.buf_mut().len() > chunk_size * 128 {
@@ -250,7 +330,14 @@ fn deserialize_direct_fn<'py>(
     parse_int: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let json_str: String = s.extract()?;
-    deserializer::deserialize_direct(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_direct(
+        py,
+        &json_str,
+        object_hook,
+        object_pairs_hook,
+        parse_float,
+        parse_int,
+    )
 }
 
 #[pyfunction]
@@ -264,7 +351,14 @@ fn deserialize_strict_fn<'py>(
     parse_int: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let json_str: String = s.extract()?;
-    deserializer::deserialize_strict(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_strict(
+        py,
+        &json_str,
+        object_hook,
+        object_pairs_hook,
+        parse_float,
+        parse_int,
+    )
 }
 
 #[pymodule]
