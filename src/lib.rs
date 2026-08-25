@@ -10,6 +10,7 @@ use writer::JsonWriter;
 // ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
 #[pyo3(signature = (obj, skipkeys=false, ensure_ascii=true, check_circular=true, allow_nan=true, cls=None, indent=None, separators=None, default=None, sort_keys=false, **_kw))]
 fn dumps<'py>(
@@ -83,6 +84,7 @@ fn dumps<'py>(
 // ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
 #[pyo3(signature = (s, cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=true, **_kw))]
 fn loads<'py>(
@@ -121,6 +123,7 @@ fn loads<'py>(
 // ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
 #[pyo3(signature = (obj, fp, skipkeys=false, ensure_ascii=true, check_circular=true, allow_nan=true, cls=None, indent=None, separators=None, default=None, sort_keys=false, **_kw))]
 fn dump<'py>(
@@ -161,6 +164,7 @@ fn dump<'py>(
 // ═══════════════════════════════════════════════════════════════════
 
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
 #[pyo3(signature = (fp, cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=true, **_kw))]
 fn load<'py>(

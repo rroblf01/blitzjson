@@ -1,4 +1,5 @@
 /// Direct JSON writer optimized for speed.
+#[allow(dead_code)]
 pub struct JsonWriter {
     buf: String,
     ensure_ascii: bool,
@@ -72,9 +73,11 @@ impl JsonWriter {
     pub fn buf_mut(&mut self) -> &mut String {
         &mut self.buf
     }
+    #[allow(dead_code)]
     pub fn ensure_ascii(&self) -> bool {
         self.ensure_ascii
     }
+    #[allow(dead_code)]
     pub fn sort_keys(&self) -> bool {
         self.sort_keys
     }
@@ -174,6 +177,7 @@ impl JsonWriter {
         self.buf.push_str(buf.format(i));
     }
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn write_u64(&mut self, u: u64) {
         let mut buf = itoa::Buffer::new();
         self.buf.push_str(buf.format(u));

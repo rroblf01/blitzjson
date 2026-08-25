@@ -10,7 +10,7 @@ pub fn deserialize_direct<'py>(
     pf: Option<&Bound<'py, PyAny>>,
     pi: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut parser = JsonParser::new(s.as_bytes(), s);
+    let mut parser = JsonParser::new(s.as_bytes());
     parser.parse_value(py, oh, oph, pf, pi)
 }
 
@@ -22,7 +22,7 @@ pub fn deserialize_strict<'py>(
     pf: Option<&Bound<'py, PyAny>>,
     pi: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut parser = JsonParser::new(s.as_bytes(), s);
+    let mut parser = JsonParser::new(s.as_bytes());
     let result = parser.parse_value(py, oh, oph, pf, pi)?;
     parser.skip_whitespace();
     if parser.pos < parser.bytes.len() {
@@ -34,12 +34,11 @@ pub fn deserialize_strict<'py>(
 struct JsonParser<'a> {
     bytes: &'a [u8],
     pos: usize,
-    doc: &'a str,
 }
 
 impl<'a> JsonParser<'a> {
-    fn new(bytes: &'a [u8], doc: &'a str) -> Self {
-        Self { bytes, pos: 0, doc }
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
     }
 
     #[inline(always)]
