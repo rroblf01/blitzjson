@@ -102,14 +102,14 @@ vs `json` + `DjangoJSONEncoder` (CPython 3.14, Linux x86_64):
 ```
 Benchmark                           json+DJE    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 2.3µs        0.4µs      6.2x
-Nested dict (deep)                     5.2µs        1.5µs      3.3x
-Large list (1000 items)              727.1µs      217.2µs      3.3x
-String-heavy dict (20 keys)            5.3µs        1.5µs      3.5x
-Datetime dict                         10.9µs        6.4µs      1.7x
-UUID dict                              8.5µs        3.9µs      2.2x
-Decimal dict                           4.6µs        1.3µs      3.5x
-Mixed dict (all types)                 6.5µs        3.0µs      2.2x
+Simple dict (4 fields)                 2.5µs        0.8µs      3.0x
+Nested dict (deep)                     5.4µs        1.8µs      3.0x
+Large list (1000 items)              752.1µs      193.2µs      3.9x
+String-heavy dict (20 keys)            4.8µs        1.5µs      3.1x
+Datetime dict                         10.3µs        3.6µs      2.8x
+UUID dict                              7.3µs        3.9µs      1.9x
+Decimal dict                           4.4µs        1.6µs      2.7x
+Mixed dict (all types)                 7.3µs        2.8µs      2.6x
 ```
 
 ### loads
@@ -117,10 +117,10 @@ Mixed dict (all types)                 6.5µs        3.0µs      2.2x
 ```
 Benchmark                               json    blitzjson    Speedup
 ------------------------------------------------------------------------
-Simple dict (4 fields)                 1.5µs        0.5µs      2.8x
-Nested dict (deep)                     4.5µs        3.7µs      1.2x
-Large list (1000 items)              664.9µs      451.5µs      1.5x
-String-heavy dict (20 keys)            3.8µs        2.9µs      1.3x
+Simple dict (4 fields)                 1.5µs        0.8µs      2.0x
+Nested dict (deep)                     5.1µs        3.2µs      1.6x
+Large list (1000 items)              716.0µs      421.2µs      1.7x
+String-heavy dict (20 keys)            4.3µs        2.7µs      1.6x
 ```
 
 ### Django Response

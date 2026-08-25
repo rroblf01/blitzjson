@@ -7,7 +7,7 @@ use crate::writer::JsonWriter;
 
 const MAX_DEPTH: usize = 128;
 
-// ── Cached type pointers (resolved once) ──────────────────────────
+// ── Cached type pointers ──────────────────────────────────────────
 
 struct CachedTypes {
     promise: *mut PyObject,
@@ -27,26 +27,16 @@ static mut CACHED_TYPES: Option<CachedTypes> = None;
 
 unsafe fn get_cached_types(py: Python<'_>) -> Option<&'static CachedTypes> {
     if CACHED_TYPES.is_some() { return CACHED_TYPES.as_ref(); }
-    let promise = py.import("django.utils.functional").ok()
-        .and_then(|m| m.getattr("Promise").ok()).map(|o| o.as_ptr());
-    let model = py.import("django.db.models").ok()
-        .and_then(|m| m.getattr("Model").ok()).map(|o| o.as_ptr());
-    let queryset = py.import("django.db.models.query").ok()
-        .and_then(|m| m.getattr("QuerySet").ok()).map(|o| o.as_ptr());
-    let enum_type = py.import("enum").ok()
-        .and_then(|m| m.getattr("Enum").ok()).map(|o| o.as_ptr());
-    let datetime_type = py.import("datetime").ok()
-        .and_then(|m| m.getattr("datetime").ok()).map(|o| o.as_ptr());
-    let date_type = py.import("datetime").ok()
-        .and_then(|m| m.getattr("date").ok()).map(|o| o.as_ptr());
-    let time_type = py.import("datetime").ok()
-        .and_then(|m| m.getattr("time").ok()).map(|o| o.as_ptr());
-    let timedelta_type = py.import("datetime").ok()
-        .and_then(|m| m.getattr("timedelta").ok()).map(|o| o.as_ptr());
-    let uuid_type = py.import("uuid").ok()
-        .and_then(|m| m.getattr("UUID").ok()).map(|o| o.as_ptr());
-    let decimal_type = py.import("decimal").ok()
-        .and_then(|m| m.getattr("Decimal").ok()).map(|o| o.as_ptr());
+    let promise = py.import("django.utils.functional").ok().and_then(|m| m.getattr("Promise").ok()).map(|o| o.as_ptr());
+    let model = py.import("django.db.models").ok().and_then(|m| m.getattr("Model").ok()).map(|o| o.as_ptr());
+    let queryset = py.import("django.db.models.query").ok().and_then(|m| m.getattr("QuerySet").ok()).map(|o| o.as_ptr());
+    let enum_type = py.import("enum").ok().and_then(|m| m.getattr("Enum").ok()).map(|o| o.as_ptr());
+    let datetime_type = py.import("datetime").ok().and_then(|m| m.getattr("datetime").ok()).map(|o| o.as_ptr());
+    let date_type = py.import("datetime").ok().and_then(|m| m.getattr("date").ok()).map(|o| o.as_ptr());
+    let time_type = py.import("datetime").ok().and_then(|m| m.getattr("time").ok()).map(|o| o.as_ptr());
+    let timedelta_type = py.import("datetime").ok().and_then(|m| m.getattr("timedelta").ok()).map(|o| o.as_ptr());
+    let uuid_type = py.import("uuid").ok().and_then(|m| m.getattr("UUID").ok()).map(|o| o.as_ptr());
+    let decimal_type = py.import("decimal").ok().and_then(|m| m.getattr("Decimal").ok()).map(|o| o.as_ptr());
     CACHED_TYPES = Some(CachedTypes {
         promise: promise.unwrap_or(std::ptr::null_mut()),
         model: model.unwrap_or(std::ptr::null_mut()),
@@ -139,21 +129,19 @@ unsafe fn write_pyrepr(w: &mut JsonWriter, obj: *mut PyObject) {
     }
 }
 
-// ── Dict (with sort_keys + fast key write) ────────────────────────
+// ── Dict (optimized for string keys) ──────────────────────────────
 
 unsafe fn ffi_serialize_dict(
     py: Python<'_>, obj: *mut PyObject, w: &mut JsonWriter,
     depth: usize, default: *mut PyObject, allow_nan: bool,
 ) -> Result<(), PyErr> {
     if w.sort_keys() {
-        // Collect keys and their string representations for sorting
         let mut keys: Vec<(*mut PyObject, String)> = Vec::new();
         let mut pos: isize = 0;
         let mut key: *mut PyObject = std::ptr::null_mut();
         let mut _value: *mut PyObject = std::ptr::null_mut();
         while PyDict_Next(obj, &mut pos, &mut key, &mut _value) != 0 {
-            let s = extract_key_str(key);
-            keys.push((key, s));
+            keys.push((key, extract_key_str(key)));
         }
         keys.sort_by(|a, b| a.1.cmp(&b.1));
         w.write_object_open();
@@ -201,8 +189,8 @@ unsafe fn extract_key_str(key: *mut PyObject) -> String {
     let s = if !repr.is_null() {
         let ptr = PyUnicode_AsUTF8(repr);
         let result = if !ptr.is_null() {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr as *const u8, 
-                CStr::from_ptr(ptr).to_bytes().len())).to_string()
+            let len = CStr::from_ptr(ptr).to_bytes().len();
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr as *const u8, len)).to_string()
         } else { String::new() };
         Py_DECREF(repr);
         result
@@ -210,6 +198,7 @@ unsafe fn extract_key_str(key: *mut PyObject) -> String {
     s
 }
 
+/// Fast key write for dict keys. Most keys are strings.
 #[inline(always)]
 unsafe fn write_key(w: &mut JsonWriter, key: *mut PyObject) {
     if PyUnicode_Check(key) != 0 {
@@ -271,7 +260,7 @@ unsafe fn ffi_serialize_tuple(
     Ok(())
 }
 
-// ── Set / FrozenSet (with cached sort strings) ────────────────────
+// ── Set / FrozenSet ───────────────────────────────────────────────
 
 unsafe fn ffi_serialize_set(
     py: Python<'_>, obj: *mut PyObject, w: &mut JsonWriter,
@@ -298,21 +287,18 @@ unsafe fn ffi_serialize_set(
         items.push((s, item));
     }
     Py_DECREF(iter);
-
     items.sort_by(|a, b| a.0.cmp(&b.0));
-
     w.write_array_open();
     for (i, (_, item)) in items.iter().enumerate() {
         if i > 0 { w.write_comma(); }
         ffi_serialize(py, *item, w, depth + 1, default, allow_nan)?;
     }
     w.write_array_close();
-
     for (_, item) in items { Py_DECREF(item); }
     Ok(())
 }
 
-// ── Fallback (type checking by pointer) ───────────────────────────
+// ── Fallback (reordered by frequency) ─────────────────────────────
 
 unsafe fn ffi_serialize_fallback(
     py: Python<'_>, obj: *mut PyObject, w: &mut JsonWriter,
@@ -320,12 +306,21 @@ unsafe fn ffi_serialize_fallback(
 ) -> Result<(), PyErr> {
     let obj_bound = Bound::from_borrowed_ptr(py, obj);
 
+    // Check cached types (ordered by typical usage frequency)
     if let Some(ct) = get_cached_types(py) {
-        let _obj_type = Py_TYPE(obj);
-
-        // datetime (before date since datetime is subclass of date)
+        // datetime (most common complex type in Django)
         if !ct.datetime_type.is_null() && PyObject_IsInstance(obj, ct.datetime_type) == 1 {
             write_datetime(obj, w)?;
+            return Ok(());
+        }
+        // UUID (common in Django)
+        if !ct.uuid_type.is_null() && PyObject_IsInstance(obj, ct.uuid_type) == 1 {
+            write_pystr(obj, w);
+            return Ok(());
+        }
+        // Decimal (common in Django)
+        if !ct.decimal_type.is_null() && PyObject_IsInstance(obj, ct.decimal_type) == 1 {
+            write_pystr(obj, w);
             return Ok(());
         }
         // date
@@ -342,19 +337,9 @@ unsafe fn ffi_serialize_fallback(
             w.write_string(&s);
             return Ok(());
         }
-        // timedelta (direct FFI, no allocation)
+        // timedelta
         if !ct.timedelta_type.is_null() && PyObject_IsInstance(obj, ct.timedelta_type) == 1 {
             write_timedelta(obj, w)?;
-            return Ok(());
-        }
-        // UUID (direct str)
-        if !ct.uuid_type.is_null() && PyObject_IsInstance(obj, ct.uuid_type) == 1 {
-            write_pystr(obj, w);
-            return Ok(());
-        }
-        // Decimal (direct str)
-        if !ct.decimal_type.is_null() && PyObject_IsInstance(obj, ct.decimal_type) == 1 {
-            write_pystr(obj, w);
             return Ok(());
         }
         // Promise
@@ -399,7 +384,7 @@ unsafe fn ffi_serialize_fallback(
     )))
 }
 
-// ── DateTime FFI direct (no call_method0) ─────────────────────────
+// ── DateTime FFI direct ───────────────────────────────────────────
 
 #[inline(always)]
 unsafe fn write_datetime(obj: *mut PyObject, w: &mut JsonWriter) -> Result<(), PyErr> {
@@ -413,7 +398,6 @@ unsafe fn write_datetime(obj: *mut PyObject, w: &mut JsonWriter) -> Result<(), P
     let tzinfo = PyDateTime_DATE_GET_TZINFO(obj);
     let has_tz = !tzinfo.is_null() && Py_IsNone(tzinfo) == 0;
 
-    // Check if UTC by comparing tzinfo is datetime.timezone.utc
     let is_utc = if has_tz {
         let dt_mod = PyImport_ImportModule(b"datetime\0".as_ptr() as *const c_char);
         if !dt_mod.is_null() {
@@ -440,12 +424,11 @@ unsafe fn write_datetime(obj: *mut PyObject, w: &mut JsonWriter) -> Result<(), P
         write!(buf, "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", y, mo, d, h, mi, s).unwrap();
     }
     if is_utc { buf.push('Z'); }
-
     w.write_string(&buf);
     Ok(())
 }
 
-// ── Timedelta FFI direct (no allocation) ──────────────────────────
+// ── Timedelta FFI direct ──────────────────────────────────────────
 
 #[inline(always)]
 unsafe fn write_timedelta(obj: *mut PyObject, w: &mut JsonWriter) -> Result<(), PyErr> {
@@ -467,12 +450,11 @@ unsafe fn write_timedelta(obj: *mut PyObject, w: &mut JsonWriter) -> Result<(), 
         else if secs != 0 { write!(buf, "{}S", secs).unwrap(); }
     }
     if buf == "P" || buf == "PT" { buf.push_str("T0S"); }
-
     w.write_string(&buf);
     Ok(())
 }
 
-// ── UUID/Decimal str() direct ─────────────────────────────────────
+// ── UUID/Decimal str() ────────────────────────────────────────────
 
 #[inline(always)]
 unsafe fn write_pystr(obj: *mut PyObject, w: &mut JsonWriter) {
