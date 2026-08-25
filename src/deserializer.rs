@@ -5,27 +5,25 @@ use pyo3::IntoPyObjectExt;
 pub fn deserialize_direct<'py>(
     py: Python<'py>,
     s: &str,
-    object_hook: Option<&Bound<'py, PyAny>>,
-    object_pairs_hook: Option<&Bound<'py, PyAny>>,
-    parse_float: Option<&Bound<'py, PyAny>>,
-    parse_int: Option<&Bound<'py, PyAny>>,
+    oh: Option<&Bound<'py, PyAny>>,
+    oph: Option<&Bound<'py, PyAny>>,
+    pf: Option<&Bound<'py, PyAny>>,
+    pi: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let bytes = s.as_bytes();
-    let mut parser = JsonParser::new(bytes, s);
-    parser.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)
+    let mut parser = JsonParser::new(s.as_bytes(), s);
+    parser.parse_value(py, oh, oph, pf, pi)
 }
 
 pub fn deserialize_strict<'py>(
     py: Python<'py>,
     s: &str,
-    object_hook: Option<&Bound<'py, PyAny>>,
-    object_pairs_hook: Option<&Bound<'py, PyAny>>,
-    parse_float: Option<&Bound<'py, PyAny>>,
-    parse_int: Option<&Bound<'py, PyAny>>,
+    oh: Option<&Bound<'py, PyAny>>,
+    oph: Option<&Bound<'py, PyAny>>,
+    pf: Option<&Bound<'py, PyAny>>,
+    pi: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let bytes = s.as_bytes();
-    let mut parser = JsonParser::new(bytes, s);
-    let result = parser.parse_value(py, object_hook, object_pairs_hook, parse_float, parse_int)?;
+    let mut parser = JsonParser::new(s.as_bytes(), s);
+    let result = parser.parse_value(py, oh, oph, pf, pi)?;
     parser.skip_whitespace();
     if parser.pos < parser.bytes.len() {
         return Err(parser.error("Extra data after JSON value"));
@@ -131,7 +129,7 @@ impl<'a> JsonParser<'a> {
                             let hex = self.parse_hex4()?;
                             if let Some(c) = char::from_u32(hex) { result.push(c); }
                         }
-                        _ => return Err(self.error("Invalid escape sequence")),
+                        _ => return Err(self.error("Invalid escape")),
                     }
                 }
                 None => return Err(self.error("Unterminated string")),
@@ -142,35 +140,32 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_hex4(&mut self) -> PyResult<u32> {
-        let mut value: u32 = 0;
+        let mut v = 0u32;
         for _ in 0..4 {
             let b = self.next_byte().ok_or_else(|| self.error("Invalid Unicode escape"))?;
-            value = (value << 4) | match b {
+            v = (v << 4) | match b {
                 b'0'..=b'9' => (b - b'0') as u32,
                 b'a'..=b'f' => (b - b'a' + 10) as u32,
                 b'A'..=b'F' => (b - b'A' + 10) as u32,
-                _ => return Err(self.error("Invalid hex digit")),
+                _ => return Err(self.error("Invalid hex")),
             };
         }
-        Ok(value)
+        Ok(v)
     }
 
     #[inline]
     fn parse_object<'py>(
-        &mut self,
-        py: Python<'py>,
-        oh: Option<&Bound<'py, PyAny>>,
-        oph: Option<&Bound<'py, PyAny>>,
-        pf: Option<&Bound<'py, PyAny>>,
-        pi: Option<&Bound<'py, PyAny>>,
+        &mut self, py: Python<'py>,
+        oh: Option<&Bound<'py, PyAny>>, oph: Option<&Bound<'py, PyAny>>,
+        pf: Option<&Bound<'py, PyAny>>, pi: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         self.next_byte();
         self.skip_whitespace();
         if self.peek() == Some(b'}') {
             self.next_byte();
             let dict = PyDict::new(py);
-            if let Some(hook) = oph { return hook.call1((PyList::empty(py),)); }
-            if let Some(hook) = oh { return hook.call1((&dict,)); }
+            if let Some(h) = oph { return h.call1((PyList::empty(py),)); }
+            if let Some(h) = oh { return h.call1((&dict,)); }
             return Ok(dict.into_any());
         }
         let dict = PyDict::new(py);
@@ -180,8 +175,8 @@ impl<'a> JsonParser<'a> {
             self.skip_whitespace();
             match self.next_byte() { Some(b':') => {}, _ => return Err(self.error("Expected ':'")) }
             self.skip_whitespace();
-            let value = self.parse_value(py, oh, oph, pf, pi)?;
-            dict.set_item(&key, &value)?;
+            let val = self.parse_value(py, oh, oph, pf, pi)?;
+            dict.set_item(&key, &val)?;
             self.skip_whitespace();
             match self.next_byte() {
                 Some(b'}') => break,
@@ -189,28 +184,24 @@ impl<'a> JsonParser<'a> {
                 _ => return Err(self.error("Expected ',' or '}'")),
             }
         }
-        if let Some(hook) = oph {
+        if let Some(h) = oph {
             let pairs = PyList::empty(py);
             for (k, v) in dict.iter() {
                 let pair = PyList::empty(py);
-                pair.append(k)?;
-                pair.append(v)?;
+                pair.append(k)?; pair.append(v)?;
                 pairs.append(pair)?;
             }
-            return hook.call1((pairs,));
+            return h.call1((pairs,));
         }
-        if let Some(hook) = oh { return hook.call1((&dict,)); }
+        if let Some(h) = oh { return h.call1((&dict,)); }
         Ok(dict.into_any())
     }
 
     #[inline]
     fn parse_array<'py>(
-        &mut self,
-        py: Python<'py>,
-        oh: Option<&Bound<'py, PyAny>>,
-        oph: Option<&Bound<'py, PyAny>>,
-        pf: Option<&Bound<'py, PyAny>>,
-        pi: Option<&Bound<'py, PyAny>>,
+        &mut self, py: Python<'py>,
+        oh: Option<&Bound<'py, PyAny>>, oph: Option<&Bound<'py, PyAny>>,
+        pf: Option<&Bound<'py, PyAny>>, pi: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         self.next_byte();
         let list = PyList::empty(py);
@@ -218,8 +209,7 @@ impl<'a> JsonParser<'a> {
         if self.peek() == Some(b']') { self.next_byte(); return Ok(list.into_any()); }
         loop {
             self.skip_whitespace();
-            let value = self.parse_value(py, oh, oph, pf, pi)?;
-            list.append(value)?;
+            list.append(self.parse_value(py, oh, oph, pf, pi)?)?;
             self.skip_whitespace();
             match self.next_byte() {
                 Some(b']') => break,
@@ -233,60 +223,42 @@ impl<'a> JsonParser<'a> {
     #[inline]
     fn parse_bool<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         if self.bytes[self.pos..].starts_with(b"true") {
-            self.pos += 4;
-            Ok(true.into_py_any(py)?.into_bound(py))
+            self.pos += 4; Ok(true.into_py_any(py)?.into_bound(py))
         } else if self.bytes[self.pos..].starts_with(b"false") {
-            self.pos += 5;
-            Ok(false.into_py_any(py)?.into_bound(py))
-        } else {
-            Err(self.error("Invalid boolean"))
-        }
+            self.pos += 5; Ok(false.into_py_any(py)?.into_bound(py))
+        } else { Err(self.error("Invalid boolean")) }
     }
 
     #[inline]
     fn parse_null<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         if self.bytes[self.pos..].starts_with(b"null") {
-            self.pos += 4;
-            Ok(py.None().into_bound(py).into_any())
-        } else {
-            Err(self.error("Invalid null"))
-        }
+            self.pos += 4; Ok(py.None().into_bound(py).into_any())
+        } else { Err(self.error("Invalid null")) }
     }
 
     #[inline]
     fn parse_number<'py>(
-        &mut self,
-        py: Python<'py>,
-        pf: Option<&Bound<'py, PyAny>>,
-        pi: Option<&Bound<'py, PyAny>>,
+        &mut self, py: Python<'py>,
+        pf: Option<&Bound<'py, PyAny>>, pi: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let start = self.pos;
         if self.peek() == Some(b'-') { self.pos += 1; }
         while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() { self.pos += 1; }
-        let has_decimal = self.peek() == Some(b'.');
-        if has_decimal {
-            self.pos += 1;
-            while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() { self.pos += 1; }
-        }
-        let has_exponent = matches!(self.peek(), Some(b'e') | Some(b'E'));
-        if has_exponent {
-            self.pos += 1;
-            if matches!(self.peek(), Some(b'+') | Some(b'-')) { self.pos += 1; }
-            while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() { self.pos += 1; }
-        }
-        let num_str = unsafe { std::str::from_utf8_unchecked(&self.bytes[start..self.pos]) };
-        if has_decimal || has_exponent {
-            if let Some(pf) = pf { return pf.call1((num_str,)); }
-            let val: f64 = num_str.parse().map_err(|_| self.error("Invalid float"))?;
-            Ok(val.into_pyobject(py)?.into_any())
+        let has_dec = self.peek() == Some(b'.');
+        if has_dec { self.pos += 1; while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() { self.pos += 1; } }
+        let has_exp = matches!(self.peek(), Some(b'e') | Some(b'E'));
+        if has_exp { self.pos += 1; if matches!(self.peek(), Some(b'+') | Some(b'-')) { self.pos += 1; }
+            while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() { self.pos += 1; } }
+        let ns = unsafe { std::str::from_utf8_unchecked(&self.bytes[start..self.pos]) };
+        if has_dec || has_exp {
+            if let Some(f) = pf { return f.call1((ns,)); }
+            let v: f64 = ns.parse().map_err(|_| self.error("Invalid float"))?;
+            Ok(v.into_pyobject(py)?.into_any())
         } else {
-            if let Some(pi) = pi { return pi.call1((num_str,)); }
-            if let Ok(i) = num_str.parse::<i64>() { Ok(i.into_pyobject(py)?.into_any()) }
-            else if let Ok(u) = num_str.parse::<u64>() { Ok(u.into_pyobject(py)?.into_any()) }
-            else {
-                let py_int = py.import("builtins")?.call_method1("int", (num_str,))?;
-                Ok(py_int.into_any())
-            }
+            if let Some(i) = pi { return i.call1((ns,)); }
+            if let Ok(v) = ns.parse::<i64>() { Ok(v.into_pyobject(py)?.into_any()) }
+            else if let Ok(v) = ns.parse::<u64>() { Ok(v.into_pyobject(py)?.into_any()) }
+            else { let pi = py.import("builtins")?.call_method1("int", (ns,))?; Ok(pi.into_any()) }
         }
     }
 }
