@@ -1,10 +1,12 @@
-/// Direct JSON writer with ensure_ascii, indent, and sort_keys support.
+/// Direct JSON writer with ensure_ascii, indent, sort_keys, and separators support.
 pub struct JsonWriter {
     buf: String,
     ensure_ascii: bool,
     indent: Option<u8>,
     indent_level: usize,
     sort_keys: bool,
+    item_sep: &'static str,
+    key_sep: &'static str,
 }
 
 impl JsonWriter {
@@ -15,16 +17,35 @@ impl JsonWriter {
             indent: None,
             indent_level: 0,
             sort_keys: false,
+            item_sep: ", ",
+            key_sep: ": ",
         }
     }
 
     pub fn with_options(capacity: usize, ensure_ascii: bool, indent: Option<u8>, sort_keys: bool) -> Self {
+        // json.dumps uses compact separators when indent is set
+        let (item_sep, key_sep) = if indent.is_some() { (",", ":") } else { (", ", ": ") };
         Self {
             buf: String::with_capacity(capacity),
             ensure_ascii,
             indent,
             indent_level: 0,
             sort_keys,
+            item_sep,
+            key_sep,
+        }
+    }
+
+    pub fn with_separators(capacity: usize, ensure_ascii: bool, indent: Option<u8>,
+                           sort_keys: bool, item_sep: &'static str, key_sep: &'static str) -> Self {
+        Self {
+            buf: String::with_capacity(capacity),
+            ensure_ascii,
+            indent,
+            indent_level: 0,
+            sort_keys,
+            item_sep,
+            key_sep,
         }
     }
 
@@ -63,12 +84,6 @@ impl JsonWriter {
         }
     }
 
-    fn write_newline_or_space(&mut self) {
-        if self.indent.is_some() {
-            self.buf.push('\n');
-        }
-    }
-
     /// Write a JSON string with proper escaping.
     #[inline]
     pub fn write_string(&mut self, s: &str) {
@@ -101,14 +116,12 @@ impl JsonWriter {
                         i += 1;
                     }
                     if self.ensure_ascii {
-                        // Encode as \uXXXX
                         self.buf.push_str("\\u");
                         self.buf.push(HEX_CHARS[((cp >> 12) & 0x0F) as usize]);
                         self.buf.push(HEX_CHARS[((cp >> 8) & 0x0F) as usize]);
                         self.buf.push(HEX_CHARS[((cp >> 4) & 0x0F) as usize]);
                         self.buf.push(HEX_CHARS[(cp & 0x0F) as usize]);
                     } else {
-                        // Push UTF-8 directly
                         if let Some(c) = char::from_u32(cp) {
                             self.buf.push(c);
                         }
@@ -126,6 +139,11 @@ impl JsonWriter {
     #[inline]
     pub fn write_none(&mut self) {
         self.buf.push_str("null");
+    }
+
+    #[inline]
+    pub fn write_raw(&mut self, s: &str) {
+        self.buf.push_str(s);
     }
 
     #[inline]
@@ -163,6 +181,7 @@ impl JsonWriter {
         self.buf.push('[');
         if self.indent.is_some() {
             self.indent_level += 1;
+            self.write_indent();
         }
     }
 
@@ -178,6 +197,7 @@ impl JsonWriter {
         self.buf.push('{');
         if self.indent.is_some() {
             self.indent_level += 1;
+            self.write_indent();
         }
     }
 
@@ -190,17 +210,14 @@ impl JsonWriter {
     }
 
     pub fn write_comma(&mut self) {
-        self.buf.push(',');
+        self.buf.push_str(self.item_sep);
         if self.indent.is_some() {
             self.write_indent();
         }
     }
 
     pub fn write_colon(&mut self) {
-        self.buf.push(':');
-        if self.indent.is_some() {
-            self.buf.push(' ');
-        }
+        self.buf.push_str(self.key_sep);
     }
 }
 

@@ -47,21 +47,21 @@ class TestBasicTypes:
         assert result == '"ñ"' or result == '"\\u00f1"'
 
     def test_list(self):
-        assert blitzjson.dumps([1, 2, 3]) == "[1,2,3]"
+        assert blitzjson.dumps([1, 2, 3]) == "[1, 2, 3]"
 
     def test_list_empty(self):
         assert blitzjson.dumps([]) == "[]"
 
     def test_dict(self):
         result = blitzjson.dumps({"a": 1})
-        assert result == '{"a":1}'
+        assert result == '{"a": 1}'
 
     def test_dict_empty(self):
         assert blitzjson.dumps({}) == "{}"
 
     def test_nested(self):
         result = blitzjson.dumps({"a": [1, 2], "b": {"c": 3}})
-        assert result == '{"a":[1,2],"b":{"c":3}}'
+        assert result == '{"a": [1, 2], "b": {"c": 3}}'
 
 
 class TestDjangoTypes:
@@ -159,7 +159,7 @@ class TestSpecialTypes:
 
     def test_tuple(self):
         result = blitzjson.dumps((1, 2, 3))
-        assert result == "[1,2,3]"
+        assert result == "[1, 2, 3]"
 
     def test_nested_mixed(self):
         data = {
@@ -237,7 +237,7 @@ class TestDumpLoad:
         f = io.StringIO()
         blitzjson.dump({"a": 1}, f)
         f.seek(0)
-        assert f.read() == '{"a":1}'
+        assert f.read() == '{"a": 1}'
 
     def test_load_from_file(self):
         f = io.StringIO('{"a": 1}')
@@ -247,7 +247,7 @@ class TestDumpLoad:
     def test_dumpb(self):
         result = blitzjson.dumpb({"a": 1})
         assert isinstance(result, bytes)
-        assert result == b'{"a":1}'
+        assert result == b'{"a": 1}'
 
 
 class TestDumpQueryset:
@@ -262,16 +262,27 @@ class TestDumpQueryset:
 
 
 class TestEdgeCases:
-    def test_float_nan_error(self):
+    def test_float_nan_default(self):
+        # allow_nan=True by default (matches json std)
+        # json.dumps(float('nan')) returns 'NaN' (not valid JSON but matches std)
+        result = blitzjson.dumps(float("nan"))
+        assert result == "NaN"
+
+    def test_float_inf_default(self):
+        # allow_nan=True by default (matches json std)
+        result = blitzjson.dumps(float("inf"))
+        assert result == "Infinity"
+
+    def test_float_nan_allow_nan_false(self):
         try:
-            blitzjson.dumps(float("nan"))
+            blitzjson.dumps(float("nan"), allow_nan=False)
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "not JSON compliant" in str(e)
 
-    def test_float_inf_error(self):
+    def test_float_inf_allow_nan_false(self):
         try:
-            blitzjson.dumps(float("inf"))
+            blitzjson.dumps(float("inf"), allow_nan=False)
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "not JSON compliant" in str(e)

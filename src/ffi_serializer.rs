@@ -84,9 +84,16 @@ pub unsafe fn ffi_serialize(
     }
     if PyFloat_Check(obj) != 0 {
         let val = PyFloat_AS_DOUBLE(obj);
-        if val.is_nan() || val.is_infinite() {
-            if allow_nan { w.write_none(); }
+        if val.is_nan() {
+            if allow_nan { w.write_raw("NaN"); }
             else { return Err(pyo3::exceptions::PyValueError::new_err("Out of range float values are not JSON compliant")); }
+        } else if val.is_infinite() {
+            if allow_nan {
+                if val > 0.0 { w.write_raw("Infinity"); }
+                else { w.write_raw("-Infinity"); }
+            } else {
+                return Err(pyo3::exceptions::PyValueError::new_err("Out of range float values are not JSON compliant"));
+            }
         } else { w.write_f64(val); }
         return Ok(());
     }

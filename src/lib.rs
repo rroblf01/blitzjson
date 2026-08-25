@@ -5,24 +5,43 @@ mod deserializer;
 use pyo3::prelude::*;
 use writer::JsonWriter;
 
+// ═══════════════════════════════════════════════════════════════════
+// dumps - Drop-in replacement for json.dumps()
+// ═══════════════════════════════════════════════════════════════════
+
+#[allow(unused_variables)]
 #[pyfunction]
-#[pyo3(signature = (obj, _skipkeys=false, ensure_ascii=true, _check_circular=true, allow_nan=false, _cls=None, indent=None, _separators=None, default=None, sort_keys=false))]
+#[pyo3(signature = (obj, skipkeys=false, ensure_ascii=true, check_circular=true, allow_nan=true, cls=None, indent=None, separators=None, default=None, sort_keys=false, **_kw))]
 fn dumps<'py>(
     py: Python<'py>,
     obj: &Bound<'py, PyAny>,
-    _skipkeys: bool,
+    skipkeys: bool,
     ensure_ascii: bool,
-    _check_circular: bool,
+    check_circular: bool,
     allow_nan: bool,
-    _cls: Option<&Bound<'py, PyAny>>,
+    cls: Option<&Bound<'py, PyAny>>,
     indent: Option<&Bound<'py, PyAny>>,
-    _separators: Option<&Bound<'py, PyAny>>,
+    separators: Option<&Bound<'py, PyAny>>,
     default: Option<&Bound<'py, PyAny>>,
     sort_keys: bool,
+    _kw: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<String> {
     let indent_val = indent.and_then(|i| i.extract::<u8>().ok());
-    let mut writer = JsonWriter::with_options(1024, ensure_ascii, indent_val, sort_keys);
+    let (item_sep, key_sep): (&'static str, &'static str) = match separators {
+        Some(seps) => {
+            let item: String = seps.get_item(0)?.extract()?;
+            let key: String = seps.get_item(1)?.extract()?;
+            (Box::leak(item.into_boxed_str()), Box::leak(key.into_boxed_str()))
+        }
+        None => {
+            // json.dumps uses compact item separator when indent is set,
+            // but key separator is always ": " (with space)
+            if indent_val.is_some() { (",", ": ") } else { (", ", ": ") }
+        }
+    };
+    let mut writer = JsonWriter::with_separators(1024, ensure_ascii, indent_val, sort_keys, item_sep, key_sep);
     let default_obj = default.map(|d| d.as_ptr()).unwrap_or(std::ptr::null_mut());
+
     let result = unsafe {
         ffi_serializer::ffi_serialize(py, obj.as_ptr(), &mut writer, 0, default_obj, allow_nan)
     };
@@ -43,18 +62,24 @@ fn dumps<'py>(
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// loads - Drop-in replacement for json.loads()
+// ═══════════════════════════════════════════════════════════════════
+
+#[allow(unused_variables)]
 #[pyfunction]
-#[pyo3(signature = (s, _cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, _parse_constant=None, _object_pairs_pairs_hook=None))]
+#[pyo3(signature = (s, cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=true, **_kw))]
 fn loads<'py>(
     py: Python<'py>,
     s: &Bound<'py, PyAny>,
-    _cls: Option<&Bound<'py, PyAny>>,
+    cls: Option<&Bound<'py, PyAny>>,
     object_hook: Option<&Bound<'py, PyAny>>,
     object_pairs_hook: Option<&Bound<'py, PyAny>>,
     parse_float: Option<&Bound<'py, PyAny>>,
     parse_int: Option<&Bound<'py, PyAny>>,
-    _parse_constant: Option<&Bound<'py, PyAny>>,
-    _object_pairs_pairs_hook: Option<&Bound<'py, PyAny>>,
+    parse_constant: Option<&Bound<'py, PyAny>>,
+    strict: bool,
+    _kw: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let json_str: String = if s.is_instance_of::<pyo3::types::PyBytes>() {
         let bytes: &[u8] = s.extract()?;
@@ -68,43 +93,60 @@ fn loads<'py>(
     deserializer::deserialize_direct(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// dump - Drop-in replacement for json.dump()
+// ═══════════════════════════════════════════════════════════════════
+
+#[allow(unused_variables)]
 #[pyfunction]
-#[pyo3(signature = (obj, fp, _skipkeys=false, ensure_ascii=true, _check_circular=true, allow_nan=false, _cls=None, indent=None, _separators=None, default=None, sort_keys=false))]
+#[pyo3(signature = (obj, fp, skipkeys=false, ensure_ascii=true, check_circular=true, allow_nan=true, cls=None, indent=None, separators=None, default=None, sort_keys=false, **_kw))]
 fn dump<'py>(
     py: Python<'py>,
     obj: &Bound<'py, PyAny>,
     fp: &Bound<'py, PyAny>,
-    _skipkeys: bool,
+    skipkeys: bool,
     ensure_ascii: bool,
-    _check_circular: bool,
+    check_circular: bool,
     allow_nan: bool,
-    _cls: Option<&Bound<'py, PyAny>>,
+    cls: Option<&Bound<'py, PyAny>>,
     indent: Option<&Bound<'py, PyAny>>,
-    _separators: Option<&Bound<'py, PyAny>>,
+    separators: Option<&Bound<'py, PyAny>>,
     default: Option<&Bound<'py, PyAny>>,
     sort_keys: bool,
+    _kw: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<()> {
-    let s = dumps(py, obj, _skipkeys, ensure_ascii, _check_circular, allow_nan, _cls, indent, _separators, default, sort_keys)?;
+    let s = dumps(py, obj, skipkeys, ensure_ascii, check_circular, allow_nan, cls, indent, separators, default, sort_keys, None)?;
     fp.call_method1("write", (&s,))?;
     Ok(())
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// load - Drop-in replacement for json.load()
+// ═══════════════════════════════════════════════════════════════════
+
+#[allow(unused_variables)]
 #[pyfunction]
-#[pyo3(signature = (fp, _cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, _parse_constant=None))]
+#[pyo3(signature = (fp, cls=None, object_hook=None, object_pairs_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=true, **_kw))]
 fn load<'py>(
     py: Python<'py>,
     fp: &Bound<'py, PyAny>,
-    _cls: Option<&Bound<'py, PyAny>>,
+    cls: Option<&Bound<'py, PyAny>>,
     object_hook: Option<&Bound<'py, PyAny>>,
     object_pairs_hook: Option<&Bound<'py, PyAny>>,
     parse_float: Option<&Bound<'py, PyAny>>,
     parse_int: Option<&Bound<'py, PyAny>>,
-    _parse_constant: Option<&Bound<'py, PyAny>>,
+    parse_constant: Option<&Bound<'py, PyAny>>,
+    strict: bool,
+    _kw: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let content: String = fp.call_method0("read")?.extract()?;
     let json_str = content.trim();
     deserializer::deserialize_direct(py, json_str, object_hook, object_pairs_hook, parse_float, parse_int)
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Extra functions (blitzjson extensions)
+// ═══════════════════════════════════════════════════════════════════
 
 #[pyfunction]
 #[pyo3(signature = (obj, pretty=false))]
@@ -135,8 +177,6 @@ fn dump_queryset_bytes(py: Python<'_>, queryset: &Bound<'_, PyAny>) -> PyResult<
     Ok(writer.into_bytes())
 }
 
-/// Stream a Django QuerySet to a file object in chunks.
-/// Memory-efficient for large QuerySets (100k+ records).
 #[pyfunction]
 #[pyo3(signature = (queryset, fp, chunk_size=1000))]
 fn stream_dump_queryset(
@@ -148,9 +188,7 @@ fn stream_dump_queryset(
     let iterator = pyo3::types::PyIterator::from_object(queryset)?;
     let mut writer = JsonWriter::new(chunk_size * 128);
     let mut first = true;
-
     writer.write_array_open();
-
     for item_result in iterator {
         let item = item_result?;
         if !first { writer.buf_mut().push(','); }
@@ -163,7 +201,6 @@ fn stream_dump_queryset(
             writer.buf_mut().clear();
         }
     }
-
     writer.write_array_close();
     if !writer.buf_mut().is_empty() {
         fp.call_method1("write", (writer.buf_mut().as_str(),))?;
@@ -171,7 +208,6 @@ fn stream_dump_queryset(
     Ok(())
 }
 
-/// Stream a Django QuerySet as JSON lines (one JSON object per line).
 #[pyfunction]
 #[pyo3(signature = (queryset, fp, chunk_size=1000))]
 fn stream_dump_queryset_jsonl(
@@ -182,7 +218,6 @@ fn stream_dump_queryset_jsonl(
 ) -> PyResult<()> {
     let iterator = pyo3::types::PyIterator::from_object(queryset)?;
     let mut writer = JsonWriter::new(chunk_size * 128);
-
     for item_result in iterator {
         let item = item_result?;
         unsafe {
@@ -194,12 +229,15 @@ fn stream_dump_queryset_jsonl(
             writer.buf_mut().clear();
         }
     }
-
     if !writer.buf_mut().is_empty() {
         fp.call_method1("write", (writer.buf_mut().as_str(),))?;
     }
     Ok(())
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Module definition
+// ═══════════════════════════════════════════════════════════════════
 
 #[pymodule]
 #[pyo3(name = "_core")]
