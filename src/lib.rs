@@ -66,7 +66,7 @@ fn loads<'py>(
         s.extract()?
     };
 
-    deserializer::deserialize(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_direct(py, &json_str, object_hook, object_pairs_hook, parse_float, parse_int)
 }
 
 #[allow(unused_variables)]
@@ -106,12 +106,12 @@ fn load<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let content: String = fp.call_method0("read")?.extract()?;
     let json_str = content.trim();
-    deserializer::deserialize(py, json_str, object_hook, object_pairs_hook, parse_float, parse_int)
+    deserializer::deserialize_direct(py, json_str, object_hook, object_pairs_hook, parse_float, parse_int)
 }
 
 #[pyfunction]
-#[pyo3(signature = (obj, pretty=false))]
-fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, pretty: bool) -> PyResult<Vec<u8>> {
+#[pyo3(signature = (obj, _pretty=false))]
+fn dumpb(py: Python<'_>, obj: &Bound<'_, PyAny>, _pretty: bool) -> PyResult<Vec<u8>> {
     let mut writer = JsonWriter::new(1024);
     unsafe {
         ffi_serializer::ffi_serialize(py, obj.as_ptr(), &mut writer, 0)?;

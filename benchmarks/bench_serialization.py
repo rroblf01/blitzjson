@@ -11,7 +11,7 @@ from decimal import Decimal
 def benchmark(func, number=1000, rounds=3):
     """Run benchmark and return median time in microseconds."""
     times = timeit.repeat(func, number=number, repeat=rounds)
-    per_op = [t / number * 1_000_000 for t in times]  # microseconds
+    per_op = [t / number * 1_000_000 for t in times]
     return {
         "median_us": statistics.median(per_op),
         "min_us": min(per_op),
@@ -77,6 +77,15 @@ MIXED_DICT = {
     "metadata": None,
 }
 
+# String-heavy data
+STRING_DICT = {f"key_{i}": f"value_{i}" for i in range(20)}
+
+# Pre-serialized JSON strings for loads benchmarks
+SIMPLE_JSON = json.dumps(SIMPLE_DICT)
+NESTED_JSON = json.dumps(NESTED_DICT)
+LARGE_JSON = json.dumps(LARGE_LIST)
+STRING_JSON = json.dumps(STRING_DICT)
+
 
 # ── DjangoJSONEncoder for json ─────────────────────────────────────
 
@@ -132,13 +141,22 @@ def run_benchmarks():
         has_orjson = False
         print("orjson not installed, skipping orjson benchmarks\n")
 
-    benchmarks = [
+    # ── dumps benchmarks ───────────────────────────────────────
+    print("=" * 75)
+    print("DUMPS benchmarks")
+    print("=" * 75)
+    print(f"{'Benchmark':<35} {'json+DJE':>12} {'blitzjson':>12} {'Speedup':>10}")
+    print("-" * 75)
+
+    dumps_benchmarks = [
         ("Simple dict (4 fields)", lambda: json.dumps(SIMPLE_DICT, cls=DjangoJSONEncoder),
          lambda: blitzjson.dumps(SIMPLE_DICT)),
         ("Nested dict (deep)", lambda: json.dumps(NESTED_DICT, cls=DjangoJSONEncoder),
          lambda: blitzjson.dumps(NESTED_DICT)),
         ("Large list (1000 items)", lambda: json.dumps(LARGE_LIST, cls=DjangoJSONEncoder),
          lambda: blitzjson.dumps(LARGE_LIST)),
+        ("String-heavy dict (20 keys)", lambda: json.dumps(STRING_DICT, cls=DjangoJSONEncoder),
+         lambda: blitzjson.dumps(STRING_DICT)),
         ("Datetime dict", lambda: json.dumps(DATETIME_DICT, cls=DjangoJSONEncoder),
          lambda: blitzjson.dumps(DATETIME_DICT)),
         ("UUID dict", lambda: json.dumps(UUID_DICT, cls=DjangoJSONEncoder),
@@ -150,22 +168,52 @@ def run_benchmarks():
     ]
 
     if has_orjson:
-        benchmarks += [
+        dumps_benchmarks += [
             ("Simple dict (orjson)", lambda: orjson.dumps(SIMPLE_DICT),
              lambda: blitzjson.dumps(SIMPLE_DICT)),
+            ("Mixed dict (orjson)", lambda: orjson.dumps(MIXED_DICT, default=str),
+             lambda: blitzjson.dumps(MIXED_DICT)),
         ]
 
-    print(f"{'Benchmark':<35} {'json+DJE':>12} {'blitzjson':>12} {'Speedup':>10}")
-    print("-" * 75)
-
-    for name, json_fn, blitz_fn in benchmarks:
+    for name, json_fn, blitz_fn in dumps_benchmarks:
         json_result = benchmark(json_fn)
         blitz_result = benchmark(blitz_fn)
-
         json_us = json_result["median_us"]
         blitz_us = blitz_result["median_us"]
         speedup = json_us / blitz_us
+        print(f"{name:<35} {json_us:>10.1f}µs {blitz_us:>10.1f}µs {speedup:>8.1f}x")
 
+    # ── loads benchmarks ───────────────────────────────────────
+    print()
+    print("=" * 75)
+    print("LOADS benchmarks")
+    print("=" * 75)
+    print(f"{'Benchmark':<35} {'json':>12} {'blitzjson':>12} {'Speedup':>10}")
+    print("-" * 75)
+
+    loads_benchmarks = [
+        ("Simple dict (4 fields)", lambda: json.loads(SIMPLE_JSON),
+         lambda: blitzjson.loads(SIMPLE_JSON)),
+        ("Nested dict (deep)", lambda: json.loads(NESTED_JSON),
+         lambda: blitzjson.loads(NESTED_JSON)),
+        ("Large list (1000 items)", lambda: json.loads(LARGE_JSON),
+         lambda: blitzjson.loads(LARGE_JSON)),
+        ("String-heavy dict (20 keys)", lambda: json.loads(STRING_JSON),
+         lambda: blitzjson.loads(STRING_JSON)),
+    ]
+
+    if has_orjson:
+        loads_benchmarks += [
+            ("Simple dict (orjson)", lambda: orjson.loads(SIMPLE_JSON),
+             lambda: blitzjson.loads(SIMPLE_JSON)),
+        ]
+
+    for name, json_fn, blitz_fn in loads_benchmarks:
+        json_result = benchmark(json_fn)
+        blitz_result = benchmark(blitz_fn)
+        json_us = json_result["median_us"]
+        blitz_us = blitz_result["median_us"]
+        speedup = json_us / blitz_us
         print(f"{name:<35} {json_us:>10.1f}µs {blitz_us:>10.1f}µs {speedup:>8.1f}x")
 
 
